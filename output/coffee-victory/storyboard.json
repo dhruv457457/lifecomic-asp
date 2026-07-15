@@ -1,0 +1,86 @@
+{
+  "comic_id": "comic_arias-unlikely-triumph",
+  "title": "Aria's Unlikely Triumph",
+  "format": "single_page",
+  "style": "slice-of-life manga",
+  "tone": "chaotic but warm",
+  "source_story": "I missed my train, spilled coffee on my shirt, ran to the interview anyway, and somehow got the job.",
+  "character_bible": {
+    "characters": [
+      {
+        "id": "char_main",
+        "name": "Aria",
+        "visual_description": "Young woman, curly brown hair, denim jacket, expressive",
+        "continuity_notes": "Keep the same outfit, face shape, hairstyle, and expressiveness across every panel."
+      }
+    ],
+    "style_rules": [
+      "Generate artwork without text inside the panels.",
+      "Use consistent character appearance across panels.",
+      "Keep backgrounds readable and not too busy."
+    ]
+  },
+  "pages": [
+    {
+      "page": 1,
+      "page_title": "The Morning Rush",
+      "layout": "four_panel_grid",
+      "panels": [
+        {
+          "panel": 1,
+          "beat": "Aria, wide-eyed, stares at a departing train, steam rising around her. Her hands are flung up in exasperation.",
+          "caption": "Monday morning. The train pulled away as I reached the platform.",
+          "dialogue": [
+            {
+              "speaker": "Aria",
+              "text": "No, no, NO! Not today, of all days!"
+            }
+          ],
+          "image_prompt": "Single slice-of-life manga comic panel, expressive comic art, clean composition, chaotic but warm mood. Consistent recurring character: Young woman, curly brown hair, denim jacket, expressive. Keep the same face, hair, and outfit in every panel. Scene: Aria, wide-eyed, stares at a departing train, steam rising around her. Her hands are flung up in exasperation. Wide panel framing. Absolutely no text, no captions, no speech bubbles, no letters, no signs, no watermark.",
+          "image_path": "output\\coffee-victory\\panels\\p1_1.jpg"
+        },
+        {
+          "panel": 2,
+          "beat": "Aria, now rushing, stumbles slightly. A large coffee stain blooms on her white shirt. Coffee splatters around her.",
+          "caption": "Then, a moment of clumsiness added to the chaos.",
+          "dialogue": [
+            {
+              "speaker": "Aria",
+              "text": "Fantastic. Just absolutely perfect."
+            }
+          ],
+          "image_prompt": "Single slice-of-life manga comic panel, expressive comic art, clean composition, chaotic but warm mood. Consistent recurring character: Young woman, curly brown hair, denim jacket, expressive. Keep the same face, hair, and outfit in every panel. Scene: Aria, now rushing, stumbles slightly. A large coffee stain blooms on her white shirt. Coffee splatters around her. Wide panel framing. Absolutely no text, no captions, no speech bubbles, no letters, no signs, no watermark.",
+          "image_path": "output\\coffee-victory\\panels\\p1_2.jpg"
+        },
+        {
+          "panel": 3,
+          "beat": "Aria, disheveled but determined, sits opposite a stern-looking interviewer. She sweats slightly, hair a bit wild.",
+          "caption": "I somehow made it, a coffee-stained wreck, to my interview.",
+          "dialogue": [
+            {
+              "speaker": "Aria",
+              "text": "Despite appearances, I'm highly motivated!"
+            }
+          ],
+          "image_prompt": "Single slice-of-life manga comic panel, expressive comic art, clean composition, chaotic but warm mood. Consistent recurring character: Young woman, curly brown hair, denim jacket, expressive. Keep the same face, hair, and outfit in every panel. Scene: Aria, disheveled but determined, sits opposite a stern-looking interviewer. She sweats slightly, hair a bit wild. Wide panel framing. Absolutely no text, no captions, no speech bubbles, no letters, no signs, no watermark.",
+          "image_path": "output\\coffee-victory\\panels\\p1_3.jpg"
+        },
+        {
+          "panel": 4,
+          "beat": "Aria, beaming, holds up a 'Welcome' packet with a company logo. Her denim jacket is clean; the sun shines on her.",
+          "caption": "And then, against all odds, they offered me the job.",
+          "dialogue": [
+            {
+              "speaker": "Aria",
+              "text": "I actually got it! Unbelievable!"
+            }
+          ],
+          "image_prompt": "Single slice-of-life manga comic panel, expressive comic art, clean composition, chaotic but warm mood. Consistent recurring character: Young woman, curly brown hair, denim jacket, expressive. Keep the same face, hair, and outfit in every panel. Scene: Aria, beaming, holds up a 'Welcome' packet with a company logo. Her denim jacket is clean; the sun shines on her. Wide panel framing. Absolutely no text, no captions, no speech bubbles, no letters, no signs, no watermark.",
+          "image_path": "output\\coffee-victory\\panels\\p1_4.jpg"
+        }
+      ]
+    }
+  ],
+  "social_caption": "Life throws curveballs, but sometimes, you hit a home run while covered in coffee! Aria's chaotic morning ends with a new job! #MangaMonday #SliceOfLife #NewBeginnings",
+  "generated_by": "llm"
+}

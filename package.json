@@ -1,0 +1,25 @@
+{
+  "name": "lifecomic-asp",
+  "version": "0.1.0",
+  "description": "Turn life moments into multi-page comic PDFs for humans and agents.",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env src/server.js",
+    "dev": "node --watch --env-file=.env src/server.js",
+    "generate": "node src/cli.js",
+    "demo": "node src/cli.js --input examples/deadline-arc.json --out output/deadline-arc",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.80",
+    "@okxweb3/x402-core": "^0.1.0",
+    "@okxweb3/x402-evm": "^0.2.1",
+    "@okxweb3/x402-express": "^0.1.1",
+    "express": "^5.2.1",
+    "fs-extra": "^11.2.0",
+    "pdfkit": "^0.15.0",
+    "sharp": "^0.33.5",
+    "slugify": "^1.6.6",
+    "yargs": "^17.7.2"
+  }
+}

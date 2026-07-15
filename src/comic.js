@@ -1,0 +1,47 @@
+import fs from "fs-extra";
+import path from "node:path";
+import { generateStoryboard } from "./lib/storyboard-llm.js";
+import { generatePanels } from "./lib/panels.js";
+import { renderComic } from "./renderer.js";
+
+/**
+ * Full pipeline: story -> LLM storyboard -> per-panel art -> rendered pages + PDF.
+ * `withArt: false` skips image generation (placeholder pages) for the free/preview tier.
+ */
+export async function createComic(request, options = {}) {
+  const outputDir = options.outputDir || "output/comic";
+  const withArt = options.withArt !== false;
+  await fs.ensureDir(outputDir);
+
+  const { storyboard, cost: storyboardCost, source } = await generateStoryboard(request);
+  await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
+
+  let art = { generated: 0, failed: 0, cost: 0, skipped: withArt ? undefined : "art_disabled" };
+  if (withArt) {
+    art = await generatePanels(storyboard, outputDir, { concurrency: options.concurrency ?? 4 });
+    await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
+  }
+
+  const files = await renderComic(storyboard, outputDir);
+  await writeSidecars(storyboard, outputDir);
+
+  return {
+    id: storyboard.comic_id,
+    status: withArt ? (art.failed ? "rendered_partial_art" : "rendered") : "rendered_placeholder",
+    title: storyboard.title,
+    storyboardSource: source,
+    art: { generated: art.generated, failed: art.failed },
+    cost: Number((Number(storyboardCost || 0) + Number(art.cost || 0)).toFixed(6)),
+    files,
+    storyboard,
+  };
+}
+
+/** Writes the plain-text deliverables of the output package. */
+async function writeSidecars(storyboard, outputDir) {
+  const prompts = storyboard.pages
+    .flatMap((page) => page.panels.map((p) => `P${page.page}.${p.panel}: ${p.image_prompt}`))
+    .join("\n");
+  await fs.writeFile(path.join(outputDir, "image_prompts.txt"), prompts);
+  await fs.writeFile(path.join(outputDir, "social_caption.txt"), storyboard.social_caption ?? "");
+}

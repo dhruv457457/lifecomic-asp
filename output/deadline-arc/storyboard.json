@@ -1,0 +1,246 @@
+{
+  "comic_id": "comic_the-deadline-arc",
+  "title": "The Deadline Arc",
+  "format": "mini_book_4_pages",
+  "style": "slice_of_life_manga",
+  "tone": "chaotic_but_hopeful",
+  "source_story": "Today I woke up late, argued with three AI agents, almost gave up on the hackathon, then found a strange but exciting idea: turning life into comic pages.",
+  "character_bible": {
+    "characters": [
+      {
+        "id": "char_main",
+        "name": "Dhruv",
+        "visual_description": "young builder, messy black hair, hoodie, tired eyes, determined expression",
+        "continuity_notes": "Keep the same outfit, face shape, hairstyle, and emotional expressiveness across every panel."
+      }
+    ],
+    "style_rules": [
+      "Generate artwork without text inside the panels.",
+      "Use consistent character appearance across panels.",
+      "Keep backgrounds readable and not too busy."
+    ]
+  },
+  "pages": [
+    {
+      "page": 1,
+      "page_title": "The Wake-Up",
+      "layout": "four_panel_grid",
+      "panels": [
+        {
+          "panel": 1,
+          "beat": "The day starts late.",
+          "caption": "The morning did not ask permission.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Wait, what time is it?"
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The day starts late. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 2,
+          "beat": "The room is already chaos.",
+          "caption": "The evidence was everywhere.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Why are there notes on the floor?"
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The room is already chaos. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 3,
+          "beat": "The laptop waits like a trial.",
+          "caption": "The screen had opinions.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Okay. We can still fix this."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The laptop waits like a trial. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 4,
+          "beat": "The deadline appears.",
+          "caption": "Then the countdown became real.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Five days is basically tomorrow."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The deadline appears. No text, no captions, no speech bubbles, no watermarks."
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "page_title": "The Spiral",
+      "layout": "four_panel_grid",
+      "panels": [
+        {
+          "panel": 1,
+          "beat": "Three AI chats argue at once.",
+          "caption": "Every answer opened two more questions.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "One at a time, please."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: Three AI chats argue at once. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 2,
+          "beat": "The builder tries to compare ideas.",
+          "caption": "Finance, art, lifestyle, memory, all shouting.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Is this genius or nonsense?"
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The builder tries to compare ideas. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 3,
+          "beat": "Marketplace agents blur together.",
+          "caption": "The options multiplied like browser tabs.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "I need one clear thing."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: Marketplace agents blur together. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 4,
+          "beat": "The notebook fills with crossed-out plans.",
+          "caption": "Even the bad ideas left footprints.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "No, not another scanner."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The notebook fills with crossed-out plans. No text, no captions, no speech bubbles, no watermarks."
+        }
+      ]
+    },
+    {
+      "page": 3,
+      "page_title": "The Almost-Quit",
+      "layout": "four_panel_grid",
+      "panels": [
+        {
+          "panel": 1,
+          "beat": "The chair leans back.",
+          "caption": "For a minute, quitting sounded peaceful.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Maybe I sleep and become someone else."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The chair leans back. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 2,
+          "beat": "The wall of notes looks impossible.",
+          "caption": "Ambition had terrible handwriting.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "This is too much."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The wall of notes looks impossible. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 3,
+          "beat": "A tiny sentence survives the mess.",
+          "caption": "Then one phrase refused to leave.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Turn life into comics..."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: A tiny sentence survives the mess. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 4,
+          "beat": "The idea starts drawing itself.",
+          "caption": "The room got quieter around it.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Wait. That actually works."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The idea starts drawing itself. No text, no captions, no speech bubbles, no watermarks."
+        }
+      ]
+    },
+    {
+      "page": 4,
+      "page_title": "The Spark",
+      "layout": "four_panel_grid",
+      "panels": [
+        {
+          "panel": 1,
+          "beat": "A comic page sketch appears.",
+          "caption": "The mess became panels.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Four boxes. One story."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: A comic page sketch appears. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 2,
+          "beat": "The character finally smiles.",
+          "caption": "The day had not been wasted.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "This is the product."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The character finally smiles. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 3,
+          "beat": "The first page gets a title.",
+          "caption": "Every chaotic day deserves a frame.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "The Deadline Arc."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The first page gets a title. No text, no captions, no speech bubbles, no watermarks."
+        },
+        {
+          "panel": 4,
+          "beat": "The builder keeps going.",
+          "caption": "Some wins arrive as a rough sketch.",
+          "dialogue": [
+            {
+              "speaker": "Dhruv",
+              "text": "Let's build it."
+            }
+          ],
+          "image_prompt": "Style: slice_of_life_manga, expressive comic art, clean composition. Character: young builder, messy black hair, hoodie, tired eyes, determined expression. Scene beat: The builder keeps going. No text, no captions, no speech bubbles, no watermarks."
+        }
+      ]
+    }
+  ],
+  "social_caption": "Some days do not make sense until they become a story."
+}

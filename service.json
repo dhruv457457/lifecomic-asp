@@ -1,0 +1,23 @@
+{
+  "name": "LifeComic",
+  "serviceType": "A2MCP",
+  "category": "Art",
+  "hook": "Turn your day into a comic episode. Send a messy real-life moment, get back a titled, lettered comic page with a consistent character — in seconds.",
+  "summary": "LifeComic converts a short life story into a finished comic: it writes the storyboard, generates consistent-character art, and letters real captions and speech bubbles into a comic page or multi-page PDF. Built for humans and for other agents (diary, travel, wellness, coach) that want to hand a moment to a comic renderer.",
+  "deliverable": "A finished comic page or PDF book, plus the storyboard JSON, art prompts, and a shareable social caption.",
+  "examplePrompts": [
+    "Turn my day into a comic: I missed my train, spilled coffee, still got the job.",
+    "Make a 4-panel manga of my chaotic hackathon night.",
+    "Draw my trip to Tokyo as a cyberpunk comic strip.",
+    "Give me just the storyboard for this story, no art yet.",
+    "Turn this week's gym progress into a comic episode."
+  ],
+  "inputs": ["story (a short real-life moment)", "style (manga, pixar, noir, cyberpunk, ...)", "tone", "format (single page / mini book / life chapter)", "main character description"],
+  "outputs": ["comic.pdf", "page PNGs", "storyboard.json", "image_prompts.txt", "social_caption.txt"],
+  "pricing": {
+    "preview": "free (placeholder page, no art)",
+    "storyboard": "$0.02 (text script + prompts, no art)",
+    "comic": "$0.15 (single comic page with art)",
+    "book": "$0.80 (multi-page comic book)"
+  }
+}
