@@ -36,14 +36,61 @@ const ENDPOINTS = {
   x402Status: { path: "/x402/status", method: "GET", auth: "none", purpose: "Payment config: per-route prices, network, payTo." },
   preview: { path: "/mcp/preview", method: "POST", auth: "none", purpose: "Free placeholder comic page (no art) — try the layout before paying.", input: "{ story, style?, tone?, characters? }" },
   storyboard: { path: "/mcp/storyboard", method: "POST", auth: "x402", purpose: "Text-only comic script: title, per-panel beats/captions/dialogue, art prompts, social caption.", input: "{ story, style?, tone?, format?, characters? }" },
-  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG. Synchronous.", input: "{ story, style?, tone?, characters? }" },
-  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Returns a jobId immediately; poll /jobs/:jobId for the finished PDF.", input: "{ story, style?, tone?, format?, characters? }" },
+  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG. Synchronous. Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?}]}]} }" },
+  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Returns a jobId immediately; poll /jobs/:jobId for the finished PDF. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, style?, tone?, characters? }" },
   jobStatus: { path: "/jobs/:jobId", method: "GET", auth: "none", purpose: "Poll an async book job for status + finished file URLs." },
 };
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use("/files", express.static(OUTPUT_ROOT));
+
+// Per-IP rate limiter so no one can hammer the free routes (which call the paid LLM) and drain
+// credits. In-memory is fine for a single instance; move to Redis if it ever scales horizontally.
+function createRateLimiter({ windowMs = 60_000, max = 60 } = {}) {
+  const hits = new Map();
+  return (req, res, next) => {
+    const key = req.ip ?? "unknown";
+    const now = Date.now();
+    const entry = hits.get(key) ?? { count: 0, resetAt: now + windowMs };
+    if (now > entry.resetAt) {
+      entry.count = 0;
+      entry.resetAt = now + windowMs;
+    }
+    entry.count += 1;
+    hits.set(key, entry);
+    if (entry.count > max) {
+      res.status(429).json({ error: "rate limit exceeded", retryAfterMs: entry.resetAt - now });
+      return;
+    }
+    next();
+  };
+}
+
+const globalLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+// The free preview calls the LLM, so it gets a tighter limit than the read-only routes.
+const previewLimiter = createRateLimiter({ windowMs: 60_000, max: 8 });
+app.use(globalLimiter);
+
+const MAX_STORY_CHARS = 4000;
+// Accepts either Mode A (a raw `story` we expand with our LLM) or Mode B (a full `storyboard` the
+// buyer's own agent composed — we render it directly). Rejects oversized/empty input before any
+// paid model call. Panel count is clamped to the paid format downstream, so Mode B can't inflate cost.
+function validStory(req, res) {
+  const sb = req.body?.storyboard;
+  if (sb && typeof sb === "object" && Array.isArray(sb.pages) && sb.pages.length > 0) return true;
+
+  const story = String(req.body?.story ?? "");
+  if (!story.trim()) {
+    res.status(400).json({ error: "provide either 'story' (we write it) or 'storyboard' (you wrote it)" });
+    return false;
+  }
+  if (story.length > MAX_STORY_CHARS) {
+    res.status(400).json({ error: `story too long (max ${MAX_STORY_CHARS} chars)` });
+    return false;
+  }
+  return true;
+}
 
 function fileUrls(id, files) {
   const rel = (p) => `${BASE_URL}/files/${id}/${path.basename(p)}`;
@@ -86,6 +133,11 @@ app.get("/service", (_req, res) =>
     pricing: LISTING.pricing ?? null,
     styles: ["slice-of-life manga", "pixar-style 3d", "noir ink", "cyberpunk", "watercolor", "newspaper strip"],
     formats: ["single_page", "mini_book_4_pages", "life_chapter_8_pages"],
+    inputModes: {
+      raw: "Send { story } and OUR model writes the storyboard for you. Simplest.",
+      structured:
+        "Recommended for agent callers: send { storyboard } that YOU composed with your own (stronger) model — title, characters, per-panel beats, captions, dialogue, and optional per-panel image_prompt. We skip our LLM and render your vision directly. Panel count is clamped to the paid tier, so cost is fixed regardless of what you send.",
+    },
     endpoints: ENDPOINTS,
   }),
 );
@@ -95,9 +147,10 @@ app.get("/x402/status", (_req, res) => {
   res.json({ enabled: c.enabled, missingEnv: c.missingEnv, network: c.network, payTo: c.payTo, routePrices: c.routePrices, protectedRoutes: c.protectedRoutes });
 });
 
-// Free placeholder page — lets a caller see the layout/quality with zero image cost.
-app.post("/mcp/preview", asyncRoute(async (req, res) => {
-  if (!req.body?.story) return res.status(400).json({ error: "story is required" });
+// Free placeholder page — lets a caller see the layout/quality with zero image cost. Tighter
+// rate limit than the read-only routes since it still triggers a (cheap) LLM call.
+app.post("/mcp/preview", previewLimiter, asyncRoute(async (req, res) => {
+  if (!validStory(req, res)) return;
   const out = await runComic({ ...req.body, format: "single_page" }, { withArt: false });
   res.json({ paid: false, ...out });
 }));
@@ -123,14 +176,16 @@ function gateOr503(res) {
 
 app.post("/mcp/storyboard", asyncRoute(async (req, res) => {
   if (!gateOr503(res)) return;
-  if (!req.body?.story) return res.status(400).json({ error: "story is required" });
-  const { storyboard, source, cost } = await generateStoryboard(req.body);
+  if (!validStory(req, res)) return;
+  // Force single_page so the paid tier can't be upgraded to a bigger (more expensive) storyboard.
+  const { storyboard, source, cost } = await generateStoryboard({ ...req.body, format: "single_page" });
   res.json({ paid: true, storyboardSource: source, costUsd: cost, storyboard });
 }));
 
 app.post("/mcp/comic", asyncRoute(async (req, res) => {
   if (!gateOr503(res)) return;
-  if (!req.body?.story) return res.status(400).json({ error: "story is required" });
+  if (!validStory(req, res)) return;
+  // format forced AFTER the spread so the caller can't request more panels than they paid for.
   const out = await runComic({ ...req.body, format: "single_page" }, { withArt: true });
   res.json({ paid: true, ...out });
 }));
@@ -140,10 +195,12 @@ const jobs = new Map();
 
 app.post("/mcp/book", asyncRoute(async (req, res) => {
   if (!gateOr503(res)) return;
-  if (!req.body?.story) return res.status(400).json({ error: "story is required" });
+  if (!validStory(req, res)) return;
   const jobId = `job_${randomUUID().slice(0, 8)}`;
   jobs.set(jobId, { status: "running", createdAt: Date.now() });
-  runComic({ format: "mini_book_4_pages", ...req.body }, { withArt: true })
+  // format forced AFTER the spread — the $0.80 book tier is always mini_book_4_pages (16 panels),
+  // so a caller can't pass format:"life_chapter_8_pages" and get 32 panels of art for the book price.
+  runComic({ ...req.body, format: "mini_book_4_pages" }, { withArt: true })
     .then((out) => jobs.set(jobId, { status: "done", result: out, finishedAt: Date.now() }))
     .catch((error) => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : String(error) }));
   res.json({ paid: true, jobId, poll: `${BASE_URL}/jobs/${jobId}` });

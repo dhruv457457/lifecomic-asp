@@ -2,6 +2,7 @@ import fs from "fs-extra";
 import path from "node:path";
 import { generateStoryboard } from "./lib/storyboard-llm.js";
 import { generatePanels } from "./lib/panels.js";
+import { assignLayout } from "./lib/layout.js";
 import { renderComic } from "./renderer.js";
 
 /**
@@ -14,6 +15,7 @@ export async function createComic(request, options = {}) {
   await fs.ensureDir(outputDir);
 
   const { storyboard, cost: storyboardCost, source } = await generateStoryboard(request);
+  assignLayout(storyboard); // varied panel rects + per-panel aspect ratio, before any art is generated
   await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
 
   let art = { generated: 0, failed: 0, cost: 0, skipped: withArt ? undefined : "art_disabled" };

@@ -68,11 +68,11 @@ function parseJsonLoose(text) {
  * Generates one image and returns { buffer, mime, cost }. Uses the chat-completions image modality
  * (confirmed shape: choices[0].message.images[0].image_url.url = data:<mime>;base64,<data>).
  */
-export async function generateImage(prompt, { model = DEFAULT_IMAGE, timeoutMs = 90_000 } = {}) {
-  const json = await post(
-    { model, messages: [{ role: "user", content: prompt }], modalities: ["image", "text"] },
-    { timeoutMs },
-  );
+export async function generateImage(prompt, { model = DEFAULT_IMAGE, aspectRatio, timeoutMs = 90_000 } = {}) {
+  const body = { model, messages: [{ role: "user", content: prompt }], modalities: ["image", "text"] };
+  // Shape the art to the panel so the renderer's cover-fit doesn't crop out the subject.
+  if (aspectRatio) body.image_config = { aspect_ratio: aspectRatio };
+  const json = await post(body, { timeoutMs });
   const image = json.choices?.[0]?.message?.images?.[0];
   const url = image?.image_url?.url ?? image?.url ?? "";
   const match = String(url).match(/^data:(image\/\w+);base64,(.+)$/s);

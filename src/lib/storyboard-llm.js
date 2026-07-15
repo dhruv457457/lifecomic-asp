@@ -31,8 +31,8 @@ function normalizeStoryboard(request, llm) {
   const fmtKey = resolveFormat(request.format);
   const fmt = FORMATS[fmtKey];
   const title = String(llm.title || request.title || "Untitled Day").slice(0, 80);
-  const style = request.style || "slice-of-life manga";
-  const tone = request.tone || "warm and honest";
+  const style = request.style || llm.style || "slice-of-life manga";
+  const tone = request.tone || llm.tone || "warm and honest";
 
   const character = {
     id: "char_main",
@@ -62,7 +62,10 @@ function normalizeStoryboard(request, llm) {
         beat,
         caption,
         dialogue: [{ speaker: character.name, text: dialogueText }],
-        image_prompt: buildPanelImagePrompt({ style, character, beat, tone }),
+        // A caller (buyer agent) may supply its own richer art prompt; otherwise we build one.
+        image_prompt: panel.image_prompt
+          ? String(panel.image_prompt).slice(0, 1400)
+          : buildPanelImagePrompt({ style, character, beat, tone }),
       });
     }
     pages.push({
@@ -122,6 +125,14 @@ function storyboardPrompt(request) {
  * bad JSON) falls back to the deterministic template so the service never hard-fails.
  */
 export async function generateStoryboard(request, { retries = 2 } = {}) {
+  // Mode B — the buyer's own agent (Claude Code / Codex / OpenClaw) already did the creative
+  // "thinking" and handed us a full storyboard. Render it directly: no LLM call, higher quality
+  // (frontier model), full caller control. Still normalized + clamped to the paid format so the
+  // panel count (and therefore the image cost) can never exceed what the tier charges for.
+  if (request.storyboard && typeof request.storyboard === "object" && Array.isArray(request.storyboard.pages)) {
+    return { storyboard: normalizeStoryboard(request, request.storyboard), cost: 0, source: "caller" };
+  }
+
   if (!isConfigured()) {
     return { storyboard: buildTemplateStoryboard(request), cost: 0, source: "template" };
   }

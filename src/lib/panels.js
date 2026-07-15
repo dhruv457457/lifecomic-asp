@@ -40,7 +40,7 @@ export async function generatePanels(storyboard, outputDir, { concurrency = 4, r
   await mapLimit(flat, concurrency, async ({ page, panel }) => {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
-        const img = await generateImage(panel.image_prompt);
+        const img = await generateImage(panel.image_prompt, { aspectRatio: panel.aspect_ratio });
         const ext = img.mime === "image/png" ? "png" : "jpg";
         const file = path.join(panelsDir, `p${page}_${panel.panel}.${ext}`);
         await fs.writeFile(file, img.buffer);

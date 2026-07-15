@@ -3,17 +3,12 @@ import path from "node:path";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-
-const PAGE = {
-  width: 1600,
-  height: 2200,
-  margin: 90,
-  titleHeight: 130,
-  gap: 34,
-  footerHeight: 70
-};
+import { PAGE, panelArea, assignLayout } from "./lib/layout.js";
 
 export async function renderComic(storyboard, outputDir) {
+  // Ensure every panel has a layout rect (storyboards rendered without the pipeline, or older ones).
+  if (!storyboard.pages?.[0]?.panels?.[0]?.layout) assignLayout(storyboard);
+
   const pagesDir = path.join(outputDir, "pages");
   await fs.ensureDir(pagesDir);
 
@@ -41,28 +36,33 @@ async function renderPage(storyboard, page, outPath) {
   drawBackground(ctx);
   drawHeader(ctx, storyboard.title, page.page_title);
 
-  const panelAreaTop = PAGE.margin + PAGE.titleHeight;
-  const panelAreaHeight = PAGE.height - panelAreaTop - PAGE.margin - PAGE.footerHeight;
-  const panelWidth = (PAGE.width - PAGE.margin * 2 - PAGE.gap) / 2;
-  const panelHeight = (panelAreaHeight - PAGE.gap) / 2;
-
+  // Fall back to a plain grid only if a panel is missing its assigned layout rect.
+  const area = panelArea();
   for (let index = 0; index < page.panels.length; index += 1) {
     const panel = page.panels[index];
-    const col = index % 2;
-    const row = Math.floor(index / 2);
-    const x = PAGE.margin + col * (panelWidth + PAGE.gap);
-    const y = panelAreaTop + row * (panelHeight + PAGE.gap);
+    const rect = panel.layout || gridFallback(area, index, page.panels.length);
     let image = null;
     if (panel.image_path) {
       image = await loadImage(panel.image_path).catch(() => null);
     }
-    drawPanel(ctx, panel, image, x, y, panelWidth, panelHeight, index);
+    drawPanel(ctx, panel, image, rect.x, rect.y, rect.w, rect.h, index);
   }
 
   drawFooter(ctx, page.page);
 
   const buffer = canvas.toBuffer("image/png");
   await sharp(buffer).png().toFile(outPath);
+}
+
+function gridFallback(area, index, count) {
+  const cols = 2;
+  const rows = Math.ceil(count / cols);
+  const g = PAGE.gutter;
+  const w = (area.w - g * (cols - 1)) / cols;
+  const h = (area.h - g * (rows - 1)) / rows;
+  const col = index % cols;
+  const row = Math.floor(index / cols);
+  return { x: area.x + col * (w + g), y: area.y + row * (h + g), w, h };
 }
 
 function drawBackground(ctx) {
@@ -76,7 +76,14 @@ function drawBackground(ctx) {
 
 function drawHeader(ctx, title, pageTitle) {
   ctx.fillStyle = "#1b1714";
-  ctx.font = "bold 72px Georgia";
+  // Auto-shrink the title so long ones (e.g. "JAIPUR WEB-SLINGER VS. MBAPU THE UNDEAD") fit the width.
+  const maxTitleWidth = PAGE.width - PAGE.margin * 2;
+  let titleSize = 72;
+  do {
+    ctx.font = `bold ${titleSize}px Georgia`;
+    if (ctx.measureText(title).width <= maxTitleWidth) break;
+    titleSize -= 2;
+  } while (titleSize > 34);
   ctx.fillText(title, PAGE.margin, 135);
   ctx.font = "32px Georgia";
   ctx.fillText(pageTitle, PAGE.margin, 182);
