@@ -42,6 +42,12 @@ const ENDPOINTS = {
 };
 
 const app = express();
+// Trust exactly ONE proxy hop (Railway's edge). This makes req.ip the real client IP so the
+// per-IP rate limiter works per-user in production, while still ignoring attacker-supplied
+// X-Forwarded-For entries to the left of Railway's — so the limit can't be spoofed away.
+// Do NOT change this to `true`: that trusts the whole XFF chain and lets an attacker mint
+// unlimited rate-limit buckets to bypass the drain protection.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use("/files", express.static(OUTPUT_ROOT));
 
@@ -65,6 +71,24 @@ function createRateLimiter({ windowMs = 60_000, max = 60 } = {}) {
     }
     next();
   };
+}
+
+// Hard backstop against credit drain: the free preview is the ONLY unauthenticated path that can
+// spend money (one cheap LLM call — images always require payment). Even with per-IP rate limiting,
+// a distributed / IP-rotating attacker could trickle calls, so we also cap total *free* spend per
+// day. Past the cap the free route stops making paid calls until tomorrow (UTC). In-memory, so it
+// resets on restart — pair it with a hard credit limit in the OpenRouter dashboard as the ultimate
+// provider-side ceiling that no app bug can exceed.
+const FREE_DAILY_BUDGET_USD = Number(process.env.FREE_DAILY_BUDGET_USD || 2);
+let freeSpend = { day: "", usd: 0 };
+function freeBudgetRemaining() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (freeSpend.day !== today) freeSpend = { day: today, usd: 0 };
+  return FREE_DAILY_BUDGET_USD - freeSpend.usd;
+}
+function recordFreeSpend(usd) {
+  freeBudgetRemaining(); // roll the day over if needed before adding
+  freeSpend.usd += Number(usd) || 0;
 }
 
 const globalLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
@@ -151,7 +175,14 @@ app.get("/x402/status", (_req, res) => {
 // rate limit than the read-only routes since it still triggers a (cheap) LLM call.
 app.post("/mcp/preview", previewLimiter, asyncRoute(async (req, res) => {
   if (!validStory(req, res)) return;
+  // Refuse before spending if the day's free budget is used up (a Mode-B storyboard costs $0, but
+  // we gate uniformly — the cap only matters when a paid LLM call would happen).
+  if (freeBudgetRemaining() <= 0) {
+    res.status(429).json({ error: "daily free-preview budget exhausted; try a paid route or come back tomorrow" });
+    return;
+  }
   const out = await runComic({ ...req.body, format: "single_page" }, { withArt: false });
+  recordFreeSpend(out.costUsd);
   res.json({ paid: false, ...out });
 }));
 
