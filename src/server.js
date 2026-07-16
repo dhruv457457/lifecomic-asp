@@ -7,6 +7,8 @@ import { randomUUID } from "node:crypto";
 import { createComic } from "./comic.js";
 import { generateStoryboard } from "./lib/storyboard-llm.js";
 import { createX402Middleware, getX402Config } from "./lib/x402.js";
+import { uploadComic, storageEnabled } from "./lib/storage.js";
+import { createRateLimiter, createSpendBudget, redisEnabled } from "./lib/limiter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -52,48 +54,19 @@ app.use(express.json({ limit: "1mb" }));
 app.use("/files", express.static(OUTPUT_ROOT));
 
 // Per-IP rate limiter so no one can hammer the free routes (which call the paid LLM) and drain
-// credits. In-memory is fine for a single instance; move to Redis if it ever scales horizontally.
-function createRateLimiter({ windowMs = 60_000, max = 60 } = {}) {
-  const hits = new Map();
-  return (req, res, next) => {
-    const key = req.ip ?? "unknown";
-    const now = Date.now();
-    const entry = hits.get(key) ?? { count: 0, resetAt: now + windowMs };
-    if (now > entry.resetAt) {
-      entry.count = 0;
-      entry.resetAt = now + windowMs;
-    }
-    entry.count += 1;
-    hits.set(key, entry);
-    if (entry.count > max) {
-      res.status(429).json({ error: "rate limit exceeded", retryAfterMs: entry.resetAt - now });
-      return;
-    }
-    next();
-  };
-}
-
+// credits. Redis-backed when REDIS_URL is set (survives restarts + shared across instances), else
+// in-memory. See src/lib/limiter.js.
 // Hard backstop against credit drain: the free preview is the ONLY unauthenticated path that can
 // spend money (one cheap LLM call — images always require payment). Even with per-IP rate limiting,
 // a distributed / IP-rotating attacker could trickle calls, so we also cap total *free* spend per
-// day. Past the cap the free route stops making paid calls until tomorrow (UTC). In-memory, so it
-// resets on restart — pair it with a hard credit limit in the OpenRouter dashboard as the ultimate
-// provider-side ceiling that no app bug can exceed.
+// day. Past the cap the free route stops making paid calls until tomorrow (UTC). Pair it with a hard
+// credit limit in the OpenRouter dashboard as the ultimate provider-side ceiling.
 const FREE_DAILY_BUDGET_USD = Number(process.env.FREE_DAILY_BUDGET_USD || 2);
-let freeSpend = { day: "", usd: 0 };
-function freeBudgetRemaining() {
-  const today = new Date().toISOString().slice(0, 10);
-  if (freeSpend.day !== today) freeSpend = { day: today, usd: 0 };
-  return FREE_DAILY_BUDGET_USD - freeSpend.usd;
-}
-function recordFreeSpend(usd) {
-  freeBudgetRemaining(); // roll the day over if needed before adding
-  freeSpend.usd += Number(usd) || 0;
-}
+const freeBudget = createSpendBudget(FREE_DAILY_BUDGET_USD);
 
-const globalLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+const globalLimiter = createRateLimiter({ windowMs: 60_000, max: 60, prefix: "global" });
 // The free preview calls the LLM, so it gets a tighter limit than the read-only routes.
-const previewLimiter = createRateLimiter({ windowMs: 60_000, max: 8 });
+const previewLimiter = createRateLimiter({ windowMs: 60_000, max: 8, prefix: "preview" });
 app.use(globalLimiter);
 
 const MAX_STORY_CHARS = 4000;
@@ -131,6 +104,14 @@ async function runComic(request, { withArt = true } = {}) {
   const id = `comic_${randomUUID().slice(0, 8)}`;
   const outputDir = path.join(OUTPUT_ROOT, id);
   const result = await createComic(request, { outputDir, withArt });
+  // Upload to durable storage (Cloudinary) when configured so files survive redeploys; on any
+  // failure or when disabled, fall back to serving from local disk.
+  let hosted = null;
+  try {
+    hosted = await uploadComic(id, result.files);
+  } catch (error) {
+    console.warn("[storage] upload failed, serving locally:", error instanceof Error ? error.message : error);
+  }
   return {
     id,
     title: result.title,
@@ -138,8 +119,9 @@ async function runComic(request, { withArt = true } = {}) {
     storyboardSource: result.storyboardSource,
     art: result.art,
     costUsd: result.cost,
+    storage: hosted ? "cloudinary" : "local",
     social_caption: result.storyboard.social_caption,
-    files: fileUrls(id, result.files),
+    files: hosted ?? fileUrls(id, result.files),
   };
 }
 
@@ -147,7 +129,7 @@ function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true, service: SERVICE.name, version: PACKAGE_VERSION, baseUrl: BASE_URL }));
+app.get("/health", (_req, res) => res.json({ ok: true, service: SERVICE.name, version: PACKAGE_VERSION, baseUrl: BASE_URL, storage: storageEnabled() ? "cloudinary" : "local", limiter: redisEnabled() ? "redis" : "memory" }));
 
 app.get("/service", (_req, res) =>
   res.json({
@@ -177,12 +159,12 @@ app.post("/mcp/preview", previewLimiter, asyncRoute(async (req, res) => {
   if (!validStory(req, res)) return;
   // Refuse before spending if the day's free budget is used up (a Mode-B storyboard costs $0, but
   // we gate uniformly — the cap only matters when a paid LLM call would happen).
-  if (freeBudgetRemaining() <= 0) {
+  if ((await freeBudget.remaining()) <= 0) {
     res.status(429).json({ error: "daily free-preview budget exhausted; try a paid route or come back tomorrow" });
     return;
   }
   const out = await runComic({ ...req.body, format: "single_page" }, { withArt: false });
-  recordFreeSpend(out.costUsd);
+  await freeBudget.record(out.costUsd);
   res.json({ paid: false, ...out });
 }));
 

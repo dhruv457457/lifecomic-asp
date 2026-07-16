@@ -25,7 +25,8 @@ export async function createComic(request, options = {}) {
   }
 
   const files = await renderComic(storyboard, outputDir);
-  await writeSidecars(storyboard, outputDir);
+  const sidecars = await writeSidecars(storyboard, outputDir);
+  Object.assign(files, sidecars); // add imagePrompts + socialCaption paths for storage upload
 
   return {
     id: storyboard.comic_id,
@@ -39,11 +40,14 @@ export async function createComic(request, options = {}) {
   };
 }
 
-/** Writes the plain-text deliverables of the output package. */
+/** Writes the plain-text deliverables of the output package and returns their paths. */
 async function writeSidecars(storyboard, outputDir) {
   const prompts = storyboard.pages
     .flatMap((page) => page.panels.map((p) => `P${page.page}.${p.panel}: ${p.image_prompt}`))
     .join("\n");
-  await fs.writeFile(path.join(outputDir, "image_prompts.txt"), prompts);
-  await fs.writeFile(path.join(outputDir, "social_caption.txt"), storyboard.social_caption ?? "");
+  const imagePrompts = path.join(outputDir, "image_prompts.txt");
+  const socialCaption = path.join(outputDir, "social_caption.txt");
+  await fs.writeFile(imagePrompts, prompts);
+  await fs.writeFile(socialCaption, storyboard.social_caption ?? "");
+  return { imagePrompts, socialCaption };
 }
