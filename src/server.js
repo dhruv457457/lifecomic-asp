@@ -50,8 +50,8 @@ const ENDPOINTS = {
   x402Status: { path: "/x402/status", method: "GET", auth: "none", purpose: "Payment config: per-route prices, network, payTo." },
   preview: { path: "/mcp/preview", method: "POST", auth: "none", purpose: "Free placeholder comic page (no art) — try the layout before paying.", input: "{ story, style?, tone?, characters? }" },
   storyboard: { path: "/mcp/storyboard", method: "POST", auth: "x402", purpose: "Text-only comic script: title, per-panel beats/captions/dialogue, art prompts, social caption.", input: "{ story, style?, tone?, format?, characters? }" },
-  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG. Returns a jobId immediately; poll /jobs/:jobId for the finished files (~15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?}]}]} }" },
-  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Returns a jobId immediately; poll /jobs/:jobId for the finished PDF. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters? }" },
+  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG, delivered in the paid response (typically 15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?}]}]} }" },
+  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Delivered in the paid response (typically 30-90s); if a render runs unusually long you get a jobId to poll at /jobs/:jobId instead. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters? }" },
   jobStatus: { path: "/jobs/:jobId", method: "GET", auth: "none", purpose: "Poll an async book job for status + finished file URLs." },
 };
 
@@ -206,10 +206,13 @@ app.post("/mcp/storyboard", asyncRoute(async (req, res) => {
   res.json({ paid: true, storyboardSource: source, costUsd: cost, storyboard });
 }));
 
-// Both paid render routes are ASYNC: pay once, get a jobId immediately, then poll /jobs/:jobId.
-// Real art takes ~15-90s to render (single page) or 60-120s (book) — a synchronous response would
-// exceed x402/agent client timeouts, so we return fast and render in the background.
+// Paid render routes are HYBRID-synchronous. OKX's A2MCP contract replays the request after payment
+// and expects the deliverable IN that response (docs: "the request is replayed to fetch the result"),
+// so we hold the reply open until the render finishes (single page ~15-20s, book ~30-60s — well inside
+// the 300s x402 window). Only if a render exceeds SYNC_DELIVERY_SECONDS do we fall back to a jobId +
+// poll URL, and /jobs/:jobId always works as a recovery path if the client disconnects mid-wait.
 const jobs = new Map();
+const SYNC_DELIVERY_MS = Number(process.env.SYNC_DELIVERY_SECONDS || 240) * 1000;
 
 function startRenderJob(req, request) {
   const jobId = `job_${randomUUID().slice(0, 8)}`;
@@ -221,12 +224,32 @@ function startRenderJob(req, request) {
   return { jobId, baseUrl };
 }
 
+/** Waits until the job leaves "running" or the deadline passes; returns the latest job record. */
+async function waitForJob(jobId, deadlineMs) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const job = jobs.get(jobId);
+    if (job && job.status !== "running") return job;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return jobs.get(jobId);
+}
+
+/** Renders, waits for completion, and replies with the deliverable (or the poll fallback). */
+async function deliverRender(req, res, request, extra = {}) {
+  const { jobId, baseUrl } = startRenderJob(req, request);
+  const job = await waitForJob(jobId, SYNC_DELIVERY_MS);
+  if (job?.status === "done") return res.json({ paid: true, ...extra, ...job.result });
+  if (job?.status === "failed") return res.status(500).json({ paid: true, ...extra, jobId, error: job.error });
+  // Still running past the sync window: hand back the poll URL so nothing paid is ever lost.
+  res.json({ paid: true, status: "running", ...extra, jobId, poll: `${baseUrl}/jobs/${jobId}` });
+}
+
 app.post("/mcp/comic", asyncRoute(async (req, res) => {
   if (!gateOr503(res)) return;
   if (!validStory(req, res)) return;
   // format forced AFTER the spread so the caller can't request more panels than they paid for.
-  const { jobId, baseUrl } = startRenderJob(req, { ...req.body, format: "single_page" });
-  res.json({ paid: true, status: "running", jobId, poll: `${baseUrl}/jobs/${jobId}` });
+  await deliverRender(req, res, { ...req.body, format: "single_page" });
 }));
 
 app.post("/mcp/book", asyncRoute(async (req, res) => {
@@ -235,8 +258,7 @@ app.post("/mcp/book", asyncRoute(async (req, res) => {
   // Pages clamped to the same 2–12 range the x402 dynamic price used, so the render can never
   // exceed what the caller paid for (pages × per-page rate).
   const pages = clampBookPages(req.body?.pages);
-  const { jobId, baseUrl } = startRenderJob(req, { ...req.body, format: "mini_book_4_pages", pages });
-  res.json({ paid: true, status: "running", jobId, pages, poll: `${baseUrl}/jobs/${jobId}` });
+  await deliverRender(req, res, { ...req.body, format: "mini_book_4_pages", pages }, { pages });
 }));
 
 app.get("/jobs/:jobId", (req, res) => {

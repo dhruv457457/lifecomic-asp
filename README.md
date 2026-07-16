@@ -31,9 +31,9 @@ Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planner
 | GET | `/x402/status` | none | — | Payment config: per-route prices, network, payTo. |
 | POST | `/mcp/preview` | none | free | Placeholder comic page (no art) — try layout/quality with zero image cost. |
 | POST | `/mcp/storyboard` | x402 | $0.02 | Text-only comic script: title, per-panel beats/captions/dialogue, art prompts. |
-| POST | `/mcp/comic` | x402 | $0.15 | A finished single comic page (4 panels) with real art + PDF + PNG. Returns a `jobId`; poll `/jobs/:jobId` (~15-30s). |
-| POST | `/mcp/book` | x402 | $0.20/page | Multi-page comic book, any length via `pages` (2–12, default 4). Priced per page. Returns a `jobId`; poll `/jobs/:jobId`. |
-| GET | `/jobs/:jobId` | none | — | Poll an async book job for status + finished file URLs. |
+| POST | `/mcp/comic` | x402 | $0.15 | A finished single comic page (4 panels) with real art + PDF + PNG, delivered in the paid response (~15-30s). |
+| POST | `/mcp/book` | x402 | $0.20/page | Multi-page comic book, any length via `pages` (2–12, default 4). Priced per page, delivered in the paid response (~30-90s). |
+| GET | `/jobs/:jobId` | none | — | Recovery path: if a render outlives the sync window (`SYNC_DELIVERY_SECONDS`, default 240) the paid response returns a `jobId` to poll here instead. |
 
 Prices are configurable via `X402_*` env vars. Payment settles on X Layer (`eip155:196`) via the official
 OKX x402 seller middleware.
@@ -133,6 +133,7 @@ Check config: `curl http://localhost:4020/x402/status`
 | `CLOUDINARY_URL` | no | `cloudinary://key:secret@cloud`. Set → files upload to Cloudinary CDN (durable). Unset → served from local disk. |
 | `REDIS_URL` | no | Set → rate limiter + spend budget are Redis-backed (survive restarts, shared across instances). Unset → in-memory. |
 | `FREE_DAILY_BUDGET_USD` | no | Daily cap on free-preview spend. Default `2`. |
+| `SYNC_DELIVERY_SECONDS` | no | How long a paid route waits to deliver the finished comic in the same response before falling back to a `jobId` + `/jobs/:jobId` poll. Default `240`. |
 | `BASE_URL` | no | Public base for file links. If unset, derived from the request host automatically. |
 | `PORT` | no | Default `4020`. Railway injects this. |
 
