@@ -1,9 +1,9 @@
 {
-  "name": "LifeComic",
+  "name": "Real Life Comic",
   "serviceType": "A2MCP",
   "category": "Art",
   "hook": "Turn your day into a comic episode. Send a messy real-life moment, get back a titled, lettered comic page with a consistent character — in seconds.",
-  "summary": "LifeComic converts a short life story into a finished comic: it writes the storyboard, generates consistent-character art, and letters real captions and speech bubbles into a comic page or multi-page PDF. Built for humans and for other agents (diary, travel, wellness, coach) that want to hand a moment to a comic renderer.",
+  "summary": "Real Life Comic converts a short life story into a finished comic: it writes the storyboard, generates consistent-character art, and letters real captions and speech bubbles into a comic page or multi-page PDF. Built for humans and for other agents (diary, travel, wellness, coach) that want to hand a moment to a comic renderer.",
   "deliverable": "A finished comic page or PDF book, plus the storyboard JSON, art prompts, and a shareable social caption.",
   "examplePrompts": [
     "Turn my day into a comic: I missed my train, spilled coffee, still got the job.",

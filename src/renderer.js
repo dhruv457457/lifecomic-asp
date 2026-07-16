@@ -4,6 +4,7 @@ import PDFDocument from "pdfkit";
 import sharp from "sharp";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { PAGE, panelArea, assignLayout } from "./lib/layout.js";
+import { FONTS } from "./lib/fonts.js";
 
 export async function renderComic(storyboard, outputDir) {
   // Ensure every panel has a layout rect (storyboards rendered without the pipeline, or older ones).
@@ -97,7 +98,7 @@ function drawHeader(ctx, title, pageTitle) {
   const maxTitleWidth = PAGE.width - PAGE.margin * 2;
   let titleSize = 72;
   do {
-    ctx.font = `bold ${titleSize}px Georgia`;
+    ctx.font = `bold ${titleSize}px ${FONTS.display}`;
     if (ctx.measureText(title).width <= maxTitleWidth) break;
     titleSize -= 2;
   } while (titleSize > 34);
@@ -174,7 +175,7 @@ function drawPlaceholderArt(ctx, x, y, width, height, index) {
 }
 
 function drawCaption(ctx, text, x, y, width) {
-  ctx.font = "bold 28px Georgia";
+  ctx.font = `bold 28px ${FONTS.comic}`;
   const lineHeight = 34;
   const lines = computeWrappedLines(ctx, text, width - 36, 3);
   const boxHeight = 18 + lines.length * lineHeight + 6;
@@ -277,7 +278,7 @@ function drawBubble(ctx, fit, x, y, w, h, pad, side) {
 
   // Text.
   ctx.fillStyle = "#1b1714";
-  ctx.font = `${fit.fontSize}px Arial`;
+  ctx.font = `${fit.fontSize}px ${FONTS.comic}`;
   fit.lines.forEach((line, i) => {
     ctx.fillText(line, x + pad, y + pad + i * fit.lineHeight + fit.fontSize * 0.82);
   });
@@ -292,7 +293,7 @@ function drawBubble(ctx, fit, x, y, w, h, pad, side) {
 function fitText(ctx, text, maxWidth, maxLines, startSize, minSize) {
   let chosen;
   for (let size = startSize; size >= minSize; size -= 2) {
-    ctx.font = `${size}px Arial`;
+    ctx.font = `${size}px ${FONTS.comic}`;
     const lines = computeWrappedLines(ctx, text, maxWidth, maxLines);
     const maxLineWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
     chosen = { lines, fontSize: size, lineHeight: Math.round(size * 1.2), maxLineWidth };
@@ -404,12 +405,12 @@ async function renderCover(storyboard, outPath) {
 
   ctx.font = "bold 30px Arial";
   ctx.fillStyle = light ? "rgba(255,250,240,0.9)" : "#1b1714";
-  ctx.fillText("A LIFECOMIC ORIGINAL", cx, by + 96);
+  ctx.fillText("A REAL LIFE COMIC", cx, by + 96);
 
   // Title: pick the largest size that fits, then wrap up to 3 centered lines.
   let size = 132;
   do {
-    ctx.font = `bold ${size}px Georgia`;
+    ctx.font = `bold ${size}px ${FONTS.display}`;
     if (ctx.measureText(storyboard.title).width <= (bw - 160) * 2.4) break;
     size -= 4;
   } while (size > 52);
@@ -446,7 +447,7 @@ async function renderCredits(storyboard, outPath) {
   ctx.textAlign = "center";
 
   ctx.fillStyle = "#1b1714";
-  ctx.font = "bold 72px Georgia";
+  ctx.font = `bold 72px ${FONTS.display}`;
   ctx.fillText("THE END", cx, PAGE.height * 0.28);
 
   // Shareable caption, wrapped and centered.
@@ -479,10 +480,10 @@ async function renderCredits(storyboard, outPath) {
   ctx.textAlign = "center";
   ctx.font = "bold 30px Arial";
   ctx.fillStyle = "#1b1714";
-  ctx.fillText("Created with LifeComic", cx, PAGE.height - 200);
+  ctx.fillText("Created with Real Life Comic", cx, PAGE.height - 200);
   ctx.font = "24px Arial";
   ctx.fillStyle = "#7a6f66";
-  ctx.fillText("Turn your day into a comic · lifecomic", cx, PAGE.height - 156);
+  ctx.fillText("Turn your day into a comic · Real Life Comic", cx, PAGE.height - 156);
 
   ctx.textAlign = "left";
   const buffer = canvas.toBuffer("image/png");

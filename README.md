@@ -1,10 +1,10 @@
-# LifeComic ASP
+# Real Life Comic ASP
 
 Turn a real-life moment into a finished comic. Send a short story (or a full storyboard you composed
 yourself) and get back a titled, lettered comic page or multi-page PDF with consistent characters —
 built for humans **and** for agents (diary, travel, wellness, coach bots).
 
-LifeComic is a backend-only **A2MCP** service on OKX.AI: pay-per-call over **x402**. It is not "generate
+Real Life Comic is a backend-only **A2MCP** service on OKX.AI: pay-per-call over **x402**. It is not "generate
 one image" — it is a repeatable comic production pipeline: script → character continuity → per-panel art
 → dynamic page layout → captions, speech bubbles, typography → PDF export → agent-friendly JSON.
 
@@ -13,7 +13,7 @@ one image" — it is a repeatable comic production pipeline: script → characte
 
 ## Why it's differentiated
 
-Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planners). LifeComic returns a
+Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planners). Real Life Comic returns a
 **visual, shareable artifact** with real structure:
 
 - the output is instantly understandable and shareable (a comic page / PDF book)
@@ -31,7 +31,7 @@ Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planner
 | POST | `/mcp/preview` | none | free | Placeholder comic page (no art) — try layout/quality with zero image cost. |
 | POST | `/mcp/storyboard` | x402 | $0.02 | Text-only comic script: title, per-panel beats/captions/dialogue, art prompts. |
 | POST | `/mcp/comic` | x402 | $0.15 | A finished single comic page (4 panels) with real art + PDF + PNG. Synchronous. |
-| POST | `/mcp/book` | x402 | $0.80 | Multi-page comic book. Returns a `jobId`; poll `/jobs/:jobId` for the finished PDF. |
+| POST | `/mcp/book` | x402 | $0.20/page | Multi-page comic book, any length via `pages` (2–12, default 4). Priced per page. Returns a `jobId`; poll `/jobs/:jobId`. |
 | GET | `/jobs/:jobId` | none | — | Poll an async book job for status + finished file URLs. |
 
 Prices are configurable via `X402_*` env vars. Payment settles on X Layer (`eip155:196`) via the official
@@ -127,7 +127,8 @@ Check config: `curl http://localhost:4020/x402/status`
 | `OKX_API_KEY` / `OKX_SECRET_KEY` / `OKX_PASSPHRASE` | for payments | OKX x402 seller creds. Missing → paid routes return 503. |
 | `PAY_TO_ADDRESS` | for payments | Wallet that receives settlement. |
 | `X402_NETWORK` | no | Default `eip155:196` (X Layer). |
-| `X402_STORYBOARD_PRICE` / `X402_COMIC_PRICE` / `X402_BOOK_PRICE` | no | Defaults `$0.02` / `$0.15` / `$0.80`. |
+| `X402_STORYBOARD_PRICE` / `X402_COMIC_PRICE` | no | Defaults `$0.02` / `$0.15`. |
+| `X402_PER_PAGE_PRICE` | no | Book price per page (`/mcp/book` charges pages × this). Default `$0.20` (so 4 pages = $0.80). |
 | `CLOUDINARY_URL` | no | `cloudinary://key:secret@cloud`. Set → files upload to Cloudinary CDN (durable). Unset → served from local disk. |
 | `REDIS_URL` | no | Set → rate limiter + spend budget are Redis-backed (survive restarts, shared across instances). Unset → in-memory. |
 | `FREE_DAILY_BUDGET_USD` | no | Daily cap on free-preview spend. Default `2`. |

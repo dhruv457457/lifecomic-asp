@@ -35,7 +35,7 @@ test("GET /health returns liveness + version", async () => {
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.ok, true);
-  assert.equal(body.service, "LifeComic");
+  assert.equal(body.service, "Real Life Comic");
   assert.ok(body.version, "version present");
 });
 

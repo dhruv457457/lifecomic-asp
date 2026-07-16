@@ -13,6 +13,15 @@ function resolveFormat(format) {
   return FORMATS[format] ? format : "mini_book_4_pages";
 }
 
+// Flexible page count: agents can request any book length 2–12 (each page is 4 panels). Returns a
+// clamped integer, or null when no explicit count was given (falls back to the named format).
+export const MIN_PAGES = 2;
+export const MAX_PAGES = 12;
+export function clampPages(n) {
+  const v = Math.floor(Number(n));
+  return Number.isFinite(v) ? Math.max(MIN_PAGES, Math.min(MAX_PAGES, v)) : null;
+}
+
 /**
  * Builds the deterministic art prompt for a panel. Character sheet + style are reused verbatim in
  * every panel (the cheap, reliable path to character consistency), and text is explicitly banned so
@@ -30,6 +39,8 @@ function buildPanelImagePrompt({ style, character, beat, tone }) {
 function normalizeStoryboard(request, llm) {
   const fmtKey = resolveFormat(request.format);
   const fmt = FORMATS[fmtKey];
+  // An explicit numeric `pages` (2–12) overrides the named format's page count; panels stay at 4/page.
+  const pageCount = clampPages(request.pages) ?? fmt.pages;
   const title = String(llm.title || request.title || "Untitled Day").slice(0, 80);
   const style = request.style || llm.style || "slice-of-life manga";
   const tone = request.tone || llm.tone || "warm and honest";
@@ -46,7 +57,7 @@ function normalizeStoryboard(request, llm) {
 
   const llmPages = Array.isArray(llm.pages) ? llm.pages : [];
   const pages = [];
-  for (let p = 0; p < fmt.pages; p += 1) {
+  for (let p = 0; p < pageCount; p += 1) {
     const src = llmPages[p] || {};
     const srcPanels = Array.isArray(src.panels) ? src.panels : [];
     const panels = [];
@@ -90,7 +101,8 @@ function normalizeStoryboard(request, llm) {
   return {
     comic_id: `comic_${slugify(title, { lower: true, strict: true }) || "untitled"}`,
     title,
-    format: fmtKey,
+    format: clampPages(request.pages) ? `custom_${pageCount}_pages` : fmtKey,
+    pageCount,
     style,
     tone,
     source_story: request.story,
@@ -110,16 +122,18 @@ function normalizeStoryboard(request, llm) {
 
 function storyboardPrompt(request) {
   const fmt = FORMATS[resolveFormat(request.format)];
-  const totalPanels = fmt.pages * fmt.panelsPerPage;
+  const pageCount = clampPages(request.pages) ?? fmt.pages;
+  const totalPanels = pageCount * fmt.panelsPerPage;
+  const label = clampPages(request.pages) ? `${pageCount}-page` : fmt.label;
   return [
-    `Turn this real-life moment into a ${fmt.label} comic storyboard.`,
+    `Turn this real-life moment into a ${label} comic storyboard.`,
     "",
     `STORY: ${request.story}`,
     `STYLE: ${request.style || "slice-of-life manga"}`,
     `MOOD: ${request.tone || "warm and honest"}`,
     request.characters?.[0]?.name ? `MAIN CHARACTER: ${request.characters[0].name} — ${request.characters[0].description || ""}` : "",
     "",
-    `Produce exactly ${fmt.pages} page(s), each with exactly ${fmt.panelsPerPage} panels (${totalPanels} panels total).`,
+    `Produce exactly ${pageCount} page(s), each with exactly ${fmt.panelsPerPage} panels (${totalPanels} panels total).`,
     "Give the comic an evocative TITLE. For each panel provide a visual 'beat' (what we see), a short",
     "narration 'caption' (<= 12 words), and one line of 'dialogue' (<= 12 words). Keep the emotional arc",
     "coherent and end on a satisfying beat. Also give one shareable 'social_caption'.",

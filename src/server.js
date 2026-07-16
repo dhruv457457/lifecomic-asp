@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { createComic } from "./comic.js";
 import { generateStoryboard } from "./lib/storyboard-llm.js";
-import { createX402Middleware, getX402Config } from "./lib/x402.js";
+import { createX402Middleware, getX402Config, clampBookPages } from "./lib/x402.js";
 import { uploadComic, storageEnabled } from "./lib/storage.js";
 import { createRateLimiter, createSpendBudget, redisEnabled } from "./lib/limiter.js";
 
@@ -34,7 +34,7 @@ try {
 }
 
 const SERVICE = {
-  name: "LifeComic",
+  name: "Real Life Comic",
   type: "A2MCP",
   category: "Art",
   description:
@@ -48,7 +48,7 @@ const ENDPOINTS = {
   preview: { path: "/mcp/preview", method: "POST", auth: "none", purpose: "Free placeholder comic page (no art) — try the layout before paying.", input: "{ story, style?, tone?, characters? }" },
   storyboard: { path: "/mcp/storyboard", method: "POST", auth: "x402", purpose: "Text-only comic script: title, per-panel beats/captions/dialogue, art prompts, social caption.", input: "{ story, style?, tone?, format?, characters? }" },
   comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG. Synchronous. Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?}]}]} }" },
-  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Returns a jobId immediately; poll /jobs/:jobId for the finished PDF. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, style?, tone?, characters? }" },
+  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Returns a jobId immediately; poll /jobs/:jobId for the finished PDF. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters? }" },
   jobStatus: { path: "/jobs/:jobId", method: "GET", auth: "none", purpose: "Poll an async book job for status + finished file URLs." },
 };
 
@@ -221,12 +221,13 @@ app.post("/mcp/book", asyncRoute(async (req, res) => {
   jobs.set(jobId, { status: "running", createdAt: Date.now() });
   // Capture the base URL now (the async render below has no request); file links are built from it.
   const baseUrl = resolveBaseUrl(req);
-  // format forced AFTER the spread — the $0.80 book tier is always mini_book_4_pages (16 panels),
-  // so a caller can't pass format:"life_chapter_8_pages" and get 32 panels of art for the book price.
-  runComic({ ...req.body, format: "mini_book_4_pages" }, { withArt: true, baseUrl })
+  // Pages are clamped to the same 2–12 range the x402 dynamic price used, so the render can never
+  // exceed what the caller paid for (pages × per-page rate).
+  const pages = clampBookPages(req.body?.pages);
+  runComic({ ...req.body, format: "mini_book_4_pages", pages }, { withArt: true, baseUrl })
     .then((out) => jobs.set(jobId, { status: "done", result: out, finishedAt: Date.now() }))
     .catch((error) => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : String(error) }));
-  res.json({ paid: true, jobId, poll: `${baseUrl}/jobs/${jobId}` });
+  res.json({ paid: true, jobId, pages, poll: `${baseUrl}/jobs/${jobId}` });
 }));
 
 app.get("/jobs/:jobId", (req, res) => {
@@ -241,7 +242,7 @@ app.use((error, _req, res, _next) => res.status(400).json({ error: error instanc
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   http.createServer(app).listen(PORT, () => {
-    console.log(`LifeComic ASP listening on ${BASE_URL}`);
+    console.log(`Real Life Comic ASP listening on ${BASE_URL}`);
     const c = getX402Config();
     console.log(x402Enabled ? `[x402] enabled for ${c.network} on ${c.protectedRoutes.join(", ")}` : `[x402] disabled; missing: ${c.missingEnv.join(", ") || "none"}`);
   });

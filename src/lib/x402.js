@@ -4,13 +4,29 @@ import { ExactEvmScheme } from "@okxweb3/x402-evm/exact/server";
 
 const REQUIRED_ENV_KEYS = ["OKX_API_KEY", "OKX_SECRET_KEY", "OKX_PASSPHRASE", "PAY_TO_ADDRESS"];
 
+// Book page limits + per-page rate, kept here so the dynamic price and the server clamp agree.
+export const BOOK_MIN_PAGES = 2;
+export const BOOK_MAX_PAGES = 12;
+export const BOOK_DEFAULT_PAGES = 4;
+export function clampBookPages(n) {
+  const v = Math.floor(Number(n));
+  return Number.isFinite(v) ? Math.max(BOOK_MIN_PAGES, Math.min(BOOK_MAX_PAGES, v)) : BOOK_DEFAULT_PAGES;
+}
+function perPageRate() {
+  return Number(String(process.env.X402_PER_PAGE_PRICE || "$0.20").replace(/[^0-9.]/g, "")) || 0.2;
+}
+/** Price for the book route = requested pages (clamped) × per-page rate, so cost is always covered. */
+export function bookPrice(pages) {
+  return `$${(clampBookPages(pages) * perPageRate()).toFixed(2)}`;
+}
+
 export function getX402Config() {
   const missingEnv = REQUIRED_ENV_KEYS.filter((key) => !process.env[key]);
 
   const routePrices = {
     "POST /mcp/storyboard": process.env.X402_STORYBOARD_PRICE || "$0.02",
     "POST /mcp/comic": process.env.X402_COMIC_PRICE || "$0.15",
-    "POST /mcp/book": process.env.X402_BOOK_PRICE || "$0.80",
+    "POST /mcp/book": `$${perPageRate().toFixed(2)}/page (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES} pages, default ${BOOK_DEFAULT_PAGES})`,
   };
 
   return {
@@ -19,6 +35,7 @@ export function getX402Config() {
     network: process.env.X402_NETWORK || "eip155:196",
     payTo: process.env.PAY_TO_ADDRESS || null,
     routePrices,
+    perPagePrice: `$${perPageRate().toFixed(2)}`,
     syncSettle: process.env.OKX_SYNC_SETTLE !== "false",
     baseUrl: process.env.OKX_BASE_URL || "https://web3.okx.com",
     protectedRoutes: Object.keys(routePrices),
@@ -40,10 +57,15 @@ export async function createX402Middleware() {
   const resourceServer = new x402ResourceServer(facilitatorClient).register(config.network, new ExactEvmScheme());
 
   const routeDescriptions = {
-    "POST /mcp/storyboard": "LifeComic storyboard (text-only script + prompts)",
-    "POST /mcp/comic": "LifeComic single comic page (art + PDF)",
-    "POST /mcp/book": "LifeComic multi-page comic book (art + PDF)",
+    "POST /mcp/storyboard": "Real Life Comic storyboard (text-only script + prompts)",
+    "POST /mcp/comic": "Real Life Comic single comic page (art + PDF)",
+    "POST /mcp/book": "Real Life Comic multi-page comic book (art + PDF)",
   };
+
+  // The book route is priced per page: x402 supports a DynamicPrice function that reads the request
+  // body, so we charge (requested pages × per-page rate). Other routes keep their fixed price.
+  const bookDynamicPrice = (context) => bookPrice(context?.adapter?.getBody?.()?.pages);
+  const priceFor = (route) => (route === "POST /mcp/book" ? bookDynamicPrice : config.routePrices[route]);
 
   const routes = Object.fromEntries(
     config.protectedRoutes.map((route) => [
@@ -53,9 +75,9 @@ export async function createX402Middleware() {
           scheme: "exact",
           network: config.network,
           payTo: config.payTo,
-          price: config.routePrices[route],
+          price: priceFor(route),
         },
-        description: routeDescriptions[route] ?? "LifeComic paid route",
+        description: routeDescriptions[route] ?? "Real Life Comic paid route",
         mimeType: "application/json",
       },
     ]),
