@@ -14,16 +14,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const OUTPUT_ROOT = path.join(ROOT, "output");
 const PORT = Number(process.env.PORT || 4020);
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+// Strip any trailing slash so we never build links with a double slash (e.g. `.../app//jobs/...`,
+// which 404s). Railway's BASE_URL is often set with a trailing slash.
+const stripTrailingSlash = (u) => String(u).replace(/\/+$/, "");
+const BASE_URL = stripTrailingSlash(process.env.BASE_URL || `http://localhost:${PORT}`);
 const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
 
 // The public base URL for building file/poll links. Prefer an explicit BASE_URL env, but when it's
 // unset fall back to the request's own protocol+host so links are correct on any host (e.g. Railway)
 // without needing the env var. `trust proxy` (set below) makes req.protocol/host reflect the edge.
 function resolveBaseUrl(req) {
-  if (process.env.BASE_URL) return process.env.BASE_URL;
+  if (process.env.BASE_URL) return stripTrailingSlash(process.env.BASE_URL);
   const host = req?.get?.("host");
-  return host ? `${req.protocol}://${host}` : BASE_URL;
+  return host ? stripTrailingSlash(`${req.protocol}://${host}`) : BASE_URL;
 }
 
 let LISTING = {};
