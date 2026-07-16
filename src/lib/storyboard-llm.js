@@ -54,14 +54,25 @@ function normalizeStoryboard(request, llm) {
       const panel = srcPanels[i] || {};
       const beat = String(panel.beat || panel.scene || "A quiet beat in the story.").slice(0, 240);
       const caption = String(panel.caption || "").slice(0, 120);
-      const dialogueText = String(
-        panel.dialogue?.[0]?.text ?? (typeof panel.dialogue === "string" ? panel.dialogue : "") ?? "",
-      ).slice(0, 120);
+      // Keep up to two dialogue lines so the renderer can show a two-speaker exchange. Accepts an
+      // array of {speaker,text} (or bare strings) or a single string; empties are dropped.
+      const rawDialogue = Array.isArray(panel.dialogue)
+        ? panel.dialogue
+        : typeof panel.dialogue === "string"
+          ? [panel.dialogue]
+          : [];
+      const dialogue = rawDialogue
+        .map((d) => ({
+          speaker: String(d?.speaker || character.name).slice(0, 40),
+          text: String(typeof d === "string" ? d : (d?.text ?? "")).slice(0, 120),
+        }))
+        .filter((d) => d.text)
+        .slice(0, 2);
       panels.push({
         panel: i + 1,
         beat,
         caption,
-        dialogue: [{ speaker: character.name, text: dialogueText }],
+        dialogue,
         // A caller (buyer agent) may supply its own richer art prompt; otherwise we build one.
         image_prompt: panel.image_prompt
           ? String(panel.image_prompt).slice(0, 1400)

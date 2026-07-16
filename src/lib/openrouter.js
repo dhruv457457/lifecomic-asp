@@ -64,12 +64,24 @@ function parseJsonLoose(text) {
   }
 }
 
+/** data: URL for an image buffer, for passing reference art back into the model. */
+export function toDataUrl({ buffer, mime = "image/png" }) {
+  return `data:${mime};base64,${buffer.toString("base64")}`;
+}
+
 /**
  * Generates one image and returns { buffer, mime, cost }. Uses the chat-completions image modality
  * (confirmed shape: choices[0].message.images[0].image_url.url = data:<mime>;base64,<data>).
+ * `references` is an optional array of data: URLs (e.g. a character sheet) sent alongside the prompt
+ * so the model keeps the same character across panels.
  */
-export async function generateImage(prompt, { model = DEFAULT_IMAGE, aspectRatio, timeoutMs = 90_000 } = {}) {
-  const body = { model, messages: [{ role: "user", content: prompt }], modalities: ["image", "text"] };
+export async function generateImage(prompt, { model = DEFAULT_IMAGE, aspectRatio, references = [], timeoutMs = 90_000 } = {}) {
+  // When we have reference art, use the multimodal content array (text + image parts); otherwise a
+  // plain string keeps the request identical to the confirmed-working single-image path.
+  const content = references.length
+    ? [{ type: "text", text: prompt }, ...references.map((url) => ({ type: "image_url", image_url: { url } }))]
+    : prompt;
+  const body = { model, messages: [{ role: "user", content }], modalities: ["image", "text"] };
   // Shape the art to the panel so the renderer's cover-fit doesn't crop out the subject.
   if (aspectRatio) body.image_config = { aspect_ratio: aspectRatio };
   const json = await post(body, { timeoutMs });

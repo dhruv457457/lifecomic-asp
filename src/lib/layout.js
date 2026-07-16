@@ -48,7 +48,38 @@ const LAYOUTS_4 = [
     { xf: 0, yf: 0.5, wf: 0.44, hf: 0.5 },
     { xf: 0.44, yf: 0.5, wf: 0.56, hf: 0.5 },
   ],
+  // 5 — center splash: two thin top beats, one huge dramatic middle (hero), one wide bottom
+  [
+    { xf: 0, yf: 0, wf: 0.5, hf: 0.22 },
+    { xf: 0.5, yf: 0, wf: 0.5, hf: 0.22 },
+    { xf: 0, yf: 0.22, wf: 1, hf: 0.5, hero: true },
+    { xf: 0, yf: 0.72, wf: 1, hf: 0.28 },
+  ],
+  // 6 — action cascade: staggered panels for kinetic, shonen-style pages
+  [
+    { xf: 0, yf: 0, wf: 0.62, hf: 0.4, action: true },
+    { xf: 0.62, yf: 0, wf: 0.38, hf: 0.58 },
+    { xf: 0, yf: 0.4, wf: 0.62, hf: 0.6, action: true },
+    { xf: 0.62, yf: 0.58, wf: 0.38, hf: 0.42 },
+  ],
 ];
+
+// Genre-aware rotation: pick which templates a page cycles through based on the comic's style/tone.
+// Calm/slice-of-life reads best in steady banner/stacked grids; action/adventure wants the splash
+// and cascade templates. Returns an ordered array of indices into LAYOUTS_4.
+const ROTATIONS = {
+  action: [5, 3, 4, 2], // cascade, quad, splash, stacked-right — kinetic
+  calm: [0, 2, 1, 3], // banner/two/banner, two+wide, splash-left, quad — steady
+};
+const ACTION_STYLES = /cyberpunk|action|shonen|shounen|battle|hero|adventure|noir|epic/i;
+const CALM_STYLES = /slice|watercolor|wholesome|cozy|newspaper|diary|calm|gentle/i;
+
+export function layoutRotation(style = "", tone = "") {
+  const hint = `${style} ${tone}`;
+  if (ACTION_STYLES.test(hint)) return ROTATIONS.action;
+  if (CALM_STYLES.test(hint)) return ROTATIONS.calm;
+  return LAYOUTS_4.map((_, i) => i); // full variety
+}
 
 const SUPPORTED_ASPECTS = [
   ["9:16", 9 / 16],
@@ -84,9 +115,11 @@ export function nearestAspect(ratio) {
 export function assignLayout(storyboard) {
   const area = panelArea();
   const g = PAGE.gutter / 2;
+  const rotation = layoutRotation(storyboard.style, storyboard.tone);
   storyboard.pages.forEach((page, pageIndex) => {
-    const template = LAYOUTS_4[pageIndex % LAYOUTS_4.length];
-    page.layout_template = pageIndex % LAYOUTS_4.length;
+    const templateIndex = rotation[pageIndex % rotation.length];
+    const template = LAYOUTS_4[templateIndex];
+    page.layout_template = templateIndex;
     page.panels.forEach((panel, i) => {
       const slot = template[i] || template[template.length - 1];
       const rect = {
@@ -97,6 +130,9 @@ export function assignLayout(storyboard) {
       };
       panel.layout = rect;
       panel.aspect_ratio = nearestAspect(rect.w / rect.h);
+      // Slot flags the renderer/pipeline use: `hero` = big dramatic panel, `action` = draw speed lines.
+      panel.is_hero = Boolean(slot.hero);
+      panel.is_action = Boolean(slot.action);
     });
   });
   return storyboard;
