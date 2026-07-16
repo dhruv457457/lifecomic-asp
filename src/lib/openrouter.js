@@ -5,8 +5,8 @@ const DEFAULT_IMAGE = process.env.LIFECOMIC_IMAGE_MODEL || "google/gemini-3.1-fl
 const HEADERS = () => ({
   Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
   "Content-Type": "application/json",
-  "HTTP-Referer": process.env.BASE_URL || "https://reallifecomic.local",
-  "X-Title": "Real Life Comic",
+  "HTTP-Referer": process.env.BASE_URL || "https://lifecomic.local",
+  "X-Title": "LifeComic",
 });
 
 export function isConfigured() {

@@ -34,7 +34,7 @@ try {
 }
 
 const SERVICE = {
-  name: "Real Life Comic",
+  name: "LifeComic",
   type: "A2MCP",
   category: "Art",
   description:
@@ -242,7 +242,7 @@ app.use((error, _req, res, _next) => res.status(400).json({ error: error instanc
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   http.createServer(app).listen(PORT, () => {
-    console.log(`Real Life Comic ASP listening on ${BASE_URL}`);
+    console.log(`LifeComic ASP listening on ${BASE_URL}`);
     const c = getX402Config();
     console.log(x402Enabled ? `[x402] enabled for ${c.network} on ${c.protectedRoutes.join(", ")}` : `[x402] disabled; missing: ${c.missingEnv.join(", ") || "none"}`);
   });

@@ -57,9 +57,9 @@ export async function createX402Middleware() {
   const resourceServer = new x402ResourceServer(facilitatorClient).register(config.network, new ExactEvmScheme());
 
   const routeDescriptions = {
-    "POST /mcp/storyboard": "Real Life Comic storyboard (text-only script + prompts)",
-    "POST /mcp/comic": "Real Life Comic single comic page (art + PDF)",
-    "POST /mcp/book": "Real Life Comic multi-page comic book (art + PDF)",
+    "POST /mcp/storyboard": "LifeComic storyboard (text-only script + prompts)",
+    "POST /mcp/comic": "LifeComic single comic page (art + PDF)",
+    "POST /mcp/book": "LifeComic multi-page comic book (art + PDF)",
   };
 
   // The book route is priced per page: x402 supports a DynamicPrice function that reads the request
@@ -77,7 +77,7 @@ export async function createX402Middleware() {
           payTo: config.payTo,
           price: priceFor(route),
         },
-        description: routeDescriptions[route] ?? "Real Life Comic paid route",
+        description: routeDescriptions[route] ?? "LifeComic paid route",
         mimeType: "application/json",
       },
     ]),

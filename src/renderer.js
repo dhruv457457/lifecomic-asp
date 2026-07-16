@@ -405,7 +405,7 @@ async function renderCover(storyboard, outPath) {
 
   ctx.font = "bold 30px Arial";
   ctx.fillStyle = light ? "rgba(255,250,240,0.9)" : "#1b1714";
-  ctx.fillText("A REAL LIFE COMIC", cx, by + 96);
+  ctx.fillText("A LIFECOMIC ORIGINAL", cx, by + 96);
 
   // Title: pick the largest size that fits, then wrap up to 3 centered lines.
   let size = 132;
@@ -480,25 +480,32 @@ async function renderCredits(storyboard, outPath) {
   ctx.textAlign = "center";
   ctx.font = "bold 30px Arial";
   ctx.fillStyle = "#1b1714";
-  ctx.fillText("Created with Real Life Comic", cx, PAGE.height - 200);
+  ctx.fillText("Created with LifeComic", cx, PAGE.height - 200);
   ctx.font = "24px Arial";
   ctx.fillStyle = "#7a6f66";
-  ctx.fillText("Turn your day into a comic · Real Life Comic", cx, PAGE.height - 156);
+  ctx.fillText("Turn your day into a comic · LifeComic", cx, PAGE.height - 156);
 
   ctx.textAlign = "left";
   const buffer = canvas.toBuffer("image/png");
   await sharp(buffer).png().toFile(outPath);
 }
 
+// PDF width used for embedded pages. Full-res PNGs would make a multi-page book's PDF 30MB+ and blow
+// past object-storage upload limits (Cloudinary free tier = 10MB/file), so each page is downscaled
+// and JPEG-compressed for the shareable PDF. Individual page PNGs are still delivered at full res.
+const PDF_PAGE_WIDTH = 1240;
+const PDF_PAGE_HEIGHT = Math.round((PAGE.height / PAGE.width) * PDF_PAGE_WIDTH);
+
 async function renderPdf(storyboard, pageFiles, pdfPath) {
-  const doc = new PDFDocument({ size: [PAGE.width, PAGE.height], margin: 0 });
+  const doc = new PDFDocument({ size: [PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT], margin: 0 });
   const stream = fs.createWriteStream(pdfPath);
   doc.pipe(stream);
 
-  pageFiles.forEach((pageFile, index) => {
-    if (index > 0) doc.addPage({ size: [PAGE.width, PAGE.height], margin: 0 });
-    doc.image(pageFile, 0, 0, { width: PAGE.width, height: PAGE.height });
-  });
+  for (let index = 0; index < pageFiles.length; index += 1) {
+    const jpg = await sharp(pageFiles[index]).resize(PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT).jpeg({ quality: 82 }).toBuffer();
+    if (index > 0) doc.addPage({ size: [PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT], margin: 0 });
+    doc.image(jpg, 0, 0, { width: PDF_PAGE_WIDTH, height: PDF_PAGE_HEIGHT });
+  }
 
   doc.end();
   await new Promise((resolve, reject) => {

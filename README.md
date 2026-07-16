@@ -1,10 +1,10 @@
-# Real Life Comic ASP
+# LifeComic ASP
 
 Turn a real-life moment into a finished comic. Send a short story (or a full storyboard you composed
 yourself) and get back a titled, lettered comic page or multi-page PDF with consistent characters —
 built for humans **and** for agents (diary, travel, wellness, coach bots).
 
-Real Life Comic is a backend-only **A2MCP** service on OKX.AI: pay-per-call over **x402**. It is not "generate
+LifeComic is a backend-only **A2MCP** service on OKX.AI: pay-per-call over **x402**. It is not "generate
 one image" — it is a repeatable comic production pipeline: script → character continuity → per-panel art
 → dynamic page layout → captions, speech bubbles, typography → PDF export → agent-friendly JSON.
 
@@ -13,7 +13,7 @@ one image" — it is a repeatable comic production pipeline: script → characte
 
 ## Why it's differentiated
 
-Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planners). Real Life Comic returns a
+Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planners). LifeComic returns a
 **visual, shareable artifact** with real structure:
 
 - the output is instantly understandable and shareable (a comic page / PDF book)

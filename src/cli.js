@@ -6,7 +6,7 @@ import { createComic } from "./comic.js";
 const argv = yargs(hideBin(process.argv))
   .option("input", {
     alias: "i",
-    describe: "Path to a Real Life Comic JSON request",
+    describe: "Path to a LifeComic JSON request",
     type: "string",
     demandOption: true
   })
