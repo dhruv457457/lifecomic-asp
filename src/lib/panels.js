@@ -19,11 +19,16 @@ function characterRefPrompt(character, style) {
  * face/hair/outfit across the comic. Best-effort: a failure just means panels fall back to text-only
  * consistency, so it never fails the comic.
  */
+// Paid routes hold the HTTP response open until the render finishes (OKX's A2MCP contract expects the
+// deliverable inline, not a poll link), so a stuck image call must fail fast rather than sit on the
+// default 90s timeout — real calls finish in 3-10s, so 25s is generous headroom, not a tight cutoff.
+const IMAGE_TIMEOUT_MS = 25_000;
+
 async function generateCharacterReference(storyboard, panelsDir) {
   const character = storyboard.character_bible?.characters?.[0];
   if (!character?.visual_description) return null;
   try {
-    const img = await generateImage(characterRefPrompt(character, storyboard.style), { aspectRatio: "3:4" });
+    const img = await generateImage(characterRefPrompt(character, storyboard.style), { aspectRatio: "3:4", timeoutMs: IMAGE_TIMEOUT_MS });
     await fs.writeFile(path.join(panelsDir, "_character_ref.png"), img.buffer);
     return { dataUrl: toDataUrl(img), cost: img.cost ?? 0 };
   } catch {
@@ -84,7 +89,7 @@ export async function generatePanels(storyboard, outputDir, { concurrency = 4, r
   await mapLimit(flat, concurrency, async ({ page, panel }) => {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
-        const img = await generateImage(panel.image_prompt + refSuffix, { aspectRatio: panel.aspect_ratio, references });
+        const img = await generateImage(panel.image_prompt + refSuffix, { aspectRatio: panel.aspect_ratio, references, timeoutMs: IMAGE_TIMEOUT_MS });
         const ext = img.mime === "image/png" ? "png" : "jpg";
         const file = path.join(panelsDir, `p${page}_${panel.panel}.${ext}`);
         await fs.writeFile(file, img.buffer);
