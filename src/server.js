@@ -47,7 +47,7 @@ const ENDPOINTS = {
   x402Status: { path: "/x402/status", method: "GET", auth: "none", purpose: "Payment config: per-route prices, network, payTo." },
   preview: { path: "/mcp/preview", method: "POST", auth: "none", purpose: "Free placeholder comic page (no art) — try the layout before paying.", input: "{ story, style?, tone?, characters? }" },
   storyboard: { path: "/mcp/storyboard", method: "POST", auth: "x402", purpose: "Text-only comic script: title, per-panel beats/captions/dialogue, art prompts, social caption.", input: "{ story, style?, tone?, format?, characters? }" },
-  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG. Synchronous. Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?}]}]} }" },
+  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG. Returns a jobId immediately; poll /jobs/:jobId for the finished files (~15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?}]}]} }" },
   book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Returns a jobId immediately; poll /jobs/:jobId for the finished PDF. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters? }" },
   jobStatus: { path: "/jobs/:jobId", method: "GET", auth: "none", purpose: "Poll an async book job for status + finished file URLs." },
 };
@@ -203,31 +203,37 @@ app.post("/mcp/storyboard", asyncRoute(async (req, res) => {
   res.json({ paid: true, storyboardSource: source, costUsd: cost, storyboard });
 }));
 
+// Both paid render routes are ASYNC: pay once, get a jobId immediately, then poll /jobs/:jobId.
+// Real art takes ~15-90s to render (single page) or 60-120s (book) — a synchronous response would
+// exceed x402/agent client timeouts, so we return fast and render in the background.
+const jobs = new Map();
+
+function startRenderJob(req, request) {
+  const jobId = `job_${randomUUID().slice(0, 8)}`;
+  jobs.set(jobId, { status: "running", createdAt: Date.now() });
+  const baseUrl = resolveBaseUrl(req); // captured now; the background render has no request
+  runComic(request, { withArt: true, baseUrl })
+    .then((out) => jobs.set(jobId, { status: "done", result: out, finishedAt: Date.now() }))
+    .catch((error) => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : String(error) }));
+  return { jobId, baseUrl };
+}
+
 app.post("/mcp/comic", asyncRoute(async (req, res) => {
   if (!gateOr503(res)) return;
   if (!validStory(req, res)) return;
   // format forced AFTER the spread so the caller can't request more panels than they paid for.
-  const out = await runComic({ ...req.body, format: "single_page" }, { withArt: true, baseUrl: resolveBaseUrl(req) });
-  res.json({ paid: true, ...out });
+  const { jobId, baseUrl } = startRenderJob(req, { ...req.body, format: "single_page" });
+  res.json({ paid: true, status: "running", jobId, poll: `${baseUrl}/jobs/${jobId}` });
 }));
-
-// Async book jobs: pay once, get a jobId, poll /jobs/:jobId (books take 60-120s to render).
-const jobs = new Map();
 
 app.post("/mcp/book", asyncRoute(async (req, res) => {
   if (!gateOr503(res)) return;
   if (!validStory(req, res)) return;
-  const jobId = `job_${randomUUID().slice(0, 8)}`;
-  jobs.set(jobId, { status: "running", createdAt: Date.now() });
-  // Capture the base URL now (the async render below has no request); file links are built from it.
-  const baseUrl = resolveBaseUrl(req);
-  // Pages are clamped to the same 2–12 range the x402 dynamic price used, so the render can never
+  // Pages clamped to the same 2–12 range the x402 dynamic price used, so the render can never
   // exceed what the caller paid for (pages × per-page rate).
   const pages = clampBookPages(req.body?.pages);
-  runComic({ ...req.body, format: "mini_book_4_pages", pages }, { withArt: true, baseUrl })
-    .then((out) => jobs.set(jobId, { status: "done", result: out, finishedAt: Date.now() }))
-    .catch((error) => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : String(error) }));
-  res.json({ paid: true, jobId, pages, poll: `${baseUrl}/jobs/${jobId}` });
+  const { jobId, baseUrl } = startRenderJob(req, { ...req.body, format: "mini_book_4_pages", pages });
+  res.json({ paid: true, status: "running", jobId, pages, poll: `${baseUrl}/jobs/${jobId}` });
 }));
 
 app.get("/jobs/:jobId", (req, res) => {

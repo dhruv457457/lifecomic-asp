@@ -9,6 +9,7 @@ one image" — it is a repeatable comic production pipeline: script → characte
 → dynamic page layout → captions, speech bubbles, typography → PDF export → agent-friendly JSON.
 
 - **Live:** `https://lifecomic-asp-production.up.railway.app`
+- **OKX.AI:** registered as **Agent #6103** (ASP)
 - **Type:** A2MCP (pay-per-call, x402) · Category: Art / Lifestyle
 
 ## Why it's differentiated
@@ -30,7 +31,7 @@ Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planner
 | GET | `/x402/status` | none | — | Payment config: per-route prices, network, payTo. |
 | POST | `/mcp/preview` | none | free | Placeholder comic page (no art) — try layout/quality with zero image cost. |
 | POST | `/mcp/storyboard` | x402 | $0.02 | Text-only comic script: title, per-panel beats/captions/dialogue, art prompts. |
-| POST | `/mcp/comic` | x402 | $0.15 | A finished single comic page (4 panels) with real art + PDF + PNG. Synchronous. |
+| POST | `/mcp/comic` | x402 | $0.15 | A finished single comic page (4 panels) with real art + PDF + PNG. Returns a `jobId`; poll `/jobs/:jobId` (~15-30s). |
 | POST | `/mcp/book` | x402 | $0.20/page | Multi-page comic book, any length via `pages` (2–12, default 4). Priced per page. Returns a `jobId`; poll `/jobs/:jobId`. |
 | GET | `/jobs/:jobId` | none | — | Poll an async book job for status + finished file URLs. |
 
