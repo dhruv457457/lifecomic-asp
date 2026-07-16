@@ -17,6 +17,15 @@ const PORT = Number(process.env.PORT || 4020);
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
 
+// The public base URL for building file/poll links. Prefer an explicit BASE_URL env, but when it's
+// unset fall back to the request's own protocol+host so links are correct on any host (e.g. Railway)
+// without needing the env var. `trust proxy` (set below) makes req.protocol/host reflect the edge.
+function resolveBaseUrl(req) {
+  if (process.env.BASE_URL) return process.env.BASE_URL;
+  const host = req?.get?.("host");
+  return host ? `${req.protocol}://${host}` : BASE_URL;
+}
+
 let LISTING = {};
 try {
   LISTING = JSON.parse(readFileSync(path.join(ROOT, "service.json"), "utf8"));
@@ -89,18 +98,17 @@ function validStory(req, res) {
   return true;
 }
 
-function fileUrls(id, files) {
-  const rel = (p) => `${BASE_URL}/files/${id}/${path.basename(p)}`;
+function fileUrls(id, files, baseUrl = BASE_URL) {
   return {
-    pdf: rel(files.pdf),
-    pages: (files.pages || []).map((p) => `${BASE_URL}/files/${id}/pages/${path.basename(p)}`),
-    storyboard: `${BASE_URL}/files/${id}/storyboard.json`,
-    imagePrompts: `${BASE_URL}/files/${id}/image_prompts.txt`,
-    socialCaption: `${BASE_URL}/files/${id}/social_caption.txt`,
+    pdf: `${baseUrl}/files/${id}/${path.basename(files.pdf)}`,
+    pages: (files.pages || []).map((p) => `${baseUrl}/files/${id}/pages/${path.basename(p)}`),
+    storyboard: `${baseUrl}/files/${id}/storyboard.json`,
+    imagePrompts: `${baseUrl}/files/${id}/image_prompts.txt`,
+    socialCaption: `${baseUrl}/files/${id}/social_caption.txt`,
   };
 }
 
-async function runComic(request, { withArt = true } = {}) {
+async function runComic(request, { withArt = true, baseUrl = BASE_URL } = {}) {
   const id = `comic_${randomUUID().slice(0, 8)}`;
   const outputDir = path.join(OUTPUT_ROOT, id);
   const result = await createComic(request, { outputDir, withArt });
@@ -121,7 +129,7 @@ async function runComic(request, { withArt = true } = {}) {
     costUsd: result.cost,
     storage: hosted ? "cloudinary" : "local",
     social_caption: result.storyboard.social_caption,
-    files: hosted ?? fileUrls(id, result.files),
+    files: hosted ?? fileUrls(id, result.files, baseUrl),
   };
 }
 
@@ -129,7 +137,7 @@ function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true, service: SERVICE.name, version: PACKAGE_VERSION, baseUrl: BASE_URL, storage: storageEnabled() ? "cloudinary" : "local", limiter: redisEnabled() ? "redis" : "memory" }));
+app.get("/health", (req, res) => res.json({ ok: true, service: SERVICE.name, version: PACKAGE_VERSION, baseUrl: resolveBaseUrl(req), storage: storageEnabled() ? "cloudinary" : "local", limiter: redisEnabled() ? "redis" : "memory" }));
 
 app.get("/service", (_req, res) =>
   res.json({
@@ -163,7 +171,7 @@ app.post("/mcp/preview", previewLimiter, asyncRoute(async (req, res) => {
     res.status(429).json({ error: "daily free-preview budget exhausted; try a paid route or come back tomorrow" });
     return;
   }
-  const out = await runComic({ ...req.body, format: "single_page" }, { withArt: false });
+  const out = await runComic({ ...req.body, format: "single_page" }, { withArt: false, baseUrl: resolveBaseUrl(req) });
   await freeBudget.record(out.costUsd);
   res.json({ paid: false, ...out });
 }));
@@ -199,7 +207,7 @@ app.post("/mcp/comic", asyncRoute(async (req, res) => {
   if (!gateOr503(res)) return;
   if (!validStory(req, res)) return;
   // format forced AFTER the spread so the caller can't request more panels than they paid for.
-  const out = await runComic({ ...req.body, format: "single_page" }, { withArt: true });
+  const out = await runComic({ ...req.body, format: "single_page" }, { withArt: true, baseUrl: resolveBaseUrl(req) });
   res.json({ paid: true, ...out });
 }));
 
@@ -211,12 +219,14 @@ app.post("/mcp/book", asyncRoute(async (req, res) => {
   if (!validStory(req, res)) return;
   const jobId = `job_${randomUUID().slice(0, 8)}`;
   jobs.set(jobId, { status: "running", createdAt: Date.now() });
+  // Capture the base URL now (the async render below has no request); file links are built from it.
+  const baseUrl = resolveBaseUrl(req);
   // format forced AFTER the spread — the $0.80 book tier is always mini_book_4_pages (16 panels),
   // so a caller can't pass format:"life_chapter_8_pages" and get 32 panels of art for the book price.
-  runComic({ ...req.body, format: "mini_book_4_pages" }, { withArt: true })
+  runComic({ ...req.body, format: "mini_book_4_pages" }, { withArt: true, baseUrl })
     .then((out) => jobs.set(jobId, { status: "done", result: out, finishedAt: Date.now() }))
     .catch((error) => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : String(error) }));
-  res.json({ paid: true, jobId, poll: `${BASE_URL}/jobs/${jobId}` });
+  res.json({ paid: true, jobId, poll: `${baseUrl}/jobs/${jobId}` });
 }));
 
 app.get("/jobs/:jobId", (req, res) => {
