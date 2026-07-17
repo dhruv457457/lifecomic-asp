@@ -31,20 +31,25 @@ async function uploadOne(filePath, folder, { raw = false, publicId } = {}) {
  * Uploads a comic's deliverables to Cloudinary and returns the same URL shape as the local
  * `fileUrls()` (pdf, pages[], storyboard, imagePrompts, socialCaption). Returns null when storage is
  * disabled so the caller can fall back to local URLs. `files` are the local paths from createComic.
+ * Every file is independent, so all uploads run concurrently (a single page comic serialized 5 round
+ * trips before; a book could serialize 8) — this cuts real seconds off the paid-route response time.
  */
 export async function uploadComic(id, files) {
   if (!storageEnabled()) return null;
   const folder = `lifecomic/${id}`;
 
-  const pages = [];
-  for (const p of files.pages || []) {
-    pages.push(await uploadOne(p, `${folder}/pages`));
-  }
+  const [pages, pdf, storyboard, imagePrompts, socialCaption] = await Promise.all([
+    Promise.all((files.pages || []).map((p) => uploadOne(p, `${folder}/pages`))),
+    files.pdf ? uploadOne(files.pdf, folder, { raw: true, publicId: "comic" }) : null,
+    files.storyboard ? uploadOne(files.storyboard, folder, { raw: true, publicId: "storyboard" }) : null,
+    files.imagePrompts ? uploadOne(files.imagePrompts, folder, { raw: true, publicId: "image_prompts" }) : null,
+    files.socialCaption ? uploadOne(files.socialCaption, folder, { raw: true, publicId: "social_caption" }) : null,
+  ]);
 
   const out = { pages };
-  if (files.pdf) out.pdf = await uploadOne(files.pdf, folder, { raw: true, publicId: "comic" });
-  if (files.storyboard) out.storyboard = await uploadOne(files.storyboard, folder, { raw: true, publicId: "storyboard" });
-  if (files.imagePrompts) out.imagePrompts = await uploadOne(files.imagePrompts, folder, { raw: true, publicId: "image_prompts" });
-  if (files.socialCaption) out.socialCaption = await uploadOne(files.socialCaption, folder, { raw: true, publicId: "social_caption" });
+  if (pdf) out.pdf = pdf;
+  if (storyboard) out.storyboard = storyboard;
+  if (imagePrompts) out.imagePrompts = imagePrompts;
+  if (socialCaption) out.socialCaption = socialCaption;
   return out;
 }
