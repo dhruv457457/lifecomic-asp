@@ -64,6 +64,8 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use("/files", express.static(OUTPUT_ROOT));
+// Landing page, served same-origin so its demo box can call /mcp/preview without CORS.
+app.use(express.static(path.join(ROOT, "web/landing")));
 
 // Per-IP rate limiter so no one can hammer the free routes (which call the paid LLM) and drain
 // credits. Redis-backed when REDIS_URL is set (survives restarts + shared across instances), else
