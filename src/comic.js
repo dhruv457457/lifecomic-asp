@@ -20,7 +20,7 @@ export async function createComic(request, options = {}) {
 
   let art = { generated: 0, failed: 0, cost: 0, skipped: withArt ? undefined : "art_disabled" };
   if (withArt) {
-    art = await generatePanels(storyboard, outputDir, { concurrency: options.concurrency ?? 4 });
+    art = await generatePanels(storyboard, outputDir, { concurrency: options.concurrency ?? 4, characterReference: options.characterReference !== false });
     await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
   }
 

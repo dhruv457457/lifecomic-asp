@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createComic } from "./comic.js";
 import { generateStoryboard } from "./lib/storyboard-llm.js";
 import { createX402Middleware, getX402Config, clampBookPages } from "./lib/x402.js";
+import { handleMcpRequest, validateToolCall } from "./lib/mcp.js";
 import { uploadComic, storageEnabled } from "./lib/storage.js";
 import { createRateLimiter, createSpendBudget, redisEnabled } from "./lib/limiter.js";
 
@@ -46,6 +47,7 @@ const SERVICE = {
 };
 
 const ENDPOINTS = {
+  mcp: { path: "/mcp", method: "POST", auth: "x402 (tools/call only)", purpose: "MCP JSON-RPC endpoint (the A2MCP interface). initialize + tools/list are free discovery; tools/call (make_comic, make_book) is x402-gated and renders synchronously. This is the endpoint registered on OKX.AI.", input: "JSON-RPC 2.0 — tools: make_comic { story, style?, tone?, characters? }, make_book { story, pages?: 2-12, style?, tone?, characters? }" },
   health: { path: "/health", method: "GET", auth: "none", purpose: "Liveness + version." },
   x402Status: { path: "/x402/status", method: "GET", auth: "none", purpose: "Payment config: per-route prices, network, payTo." },
   preview: { path: "/mcp/preview", method: "POST", auth: "none", purpose: "Free placeholder comic page (no art) — try the layout before paying.", input: "{ story, style?, tone?, characters? }" },
@@ -183,10 +185,12 @@ app.post("/mcp/preview", previewLimiter, asyncRoute(async (req, res) => {
 
 // x402 gate (paid routes 402 → pay → retry). Disabled → those routes 503 with the missing env list.
 let x402Enabled = false;
+let mcpPaymentMiddleware = null;
 try {
   const x402 = await createX402Middleware();
   if (x402.enabled && x402.middleware) {
     app.use(x402.middleware);
+    mcpPaymentMiddleware = x402.mcpMiddleware;
     x402Enabled = true;
   }
 } catch (error) {
@@ -261,6 +265,31 @@ app.post("/mcp/book", asyncRoute(async (req, res) => {
   // exceed what the caller paid for (pages × per-page rate).
   const pages = clampBookPages(req.body?.pages);
   await deliverRender(req, res, { ...req.body, format: "mini_book_4_pages", pages }, { pages });
+}));
+
+// MCP JSON-RPC endpoint — the interface OKX.AI's A2MCP layer speaks. `initialize` / `tools/list` are
+// FREE (discovery); `tools/call` is x402-gated (payment verified + settled before we render). This is
+// the single-endpoint MCP shape listed generators use; the REST routes above stay for the web demo.
+app.post("/mcp", asyncRoute(async (req, res, next) => {
+  if (req.body?.method === "tools/call") {
+    if (!mcpPaymentMiddleware) {
+      return res.status(503).json({ jsonrpc: "2.0", id: req.body?.id ?? null, error: { code: -32000, message: "payments not configured" } });
+    }
+    // Reject malformed calls (unknown tool / missing story) BEFORE charging.
+    const invalid = validateToolCall(req.body);
+    if (invalid) return res.json(invalid);
+    // Gate payment; the middleware 402s an unpaid call itself, and calls our callback once paid+settled.
+    return mcpPaymentMiddleware(req, res, (err) => {
+      if (err) return next(err);
+      handleMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) })
+        .then((out) => (out === null ? res.status(202).end() : res.json(out)))
+        .catch(next);
+    });
+  }
+  // Free methods: initialize, tools/list, ping, notifications.
+  const out = await handleMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) });
+  if (out === null) return res.status(202).end();
+  res.json(out);
 }));
 
 app.get("/jobs/:jobId", (req, res) => {

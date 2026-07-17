@@ -84,5 +84,23 @@ export async function createX402Middleware() {
   );
 
   const middleware = paymentMiddleware(routes, resourceServer, undefined, undefined, true);
-  return { enabled: true, config, middleware };
+
+  // Separate gate for the MCP JSON-RPC endpoint (POST /mcp). Only tools/call reaches this middleware
+  // (the server lets initialize/tools-list through free), and the price is derived from the tool call
+  // body: make_book is per-page, everything else is the single-page comic price.
+  const mcpPrice = (context) => {
+    const params = context?.adapter?.getBody?.()?.params || {};
+    if (params?.name === "make_book") return bookPrice(params?.arguments?.pages);
+    return config.routePrices["POST /mcp/comic"];
+  };
+  const mcpRoutes = {
+    "POST /mcp": {
+      accepts: { scheme: "exact", network: config.network, payTo: config.payTo, price: mcpPrice },
+      description: "LifeComic MCP tool call (make_comic / make_book)",
+      mimeType: "application/json",
+    },
+  };
+  const mcpMiddleware = paymentMiddleware(mcpRoutes, resourceServer, undefined, undefined, true);
+
+  return { enabled: true, config, middleware, mcpMiddleware };
 }

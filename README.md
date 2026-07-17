@@ -26,6 +26,7 @@ Most Art/Lifestyle agents are thin wrappers (image generators, scanners, planner
 
 | Method | Route | Auth | Price | Purpose |
 | --- | --- | --- | --- | --- |
+| POST | `/mcp` | x402 (`tools/call` only) | $0.15 / $0.20/pg | **MCP JSON-RPC endpoint — the A2MCP interface registered on OKX.AI.** `initialize` + `tools/list` are free discovery; `tools/call` (`make_comic`, `make_book`) is x402-gated and renders synchronously. |
 | GET | `/health` | none | — | Liveness, version, and resolved `storage` / `limiter` / `baseUrl`. |
 | GET | `/service` | none | — | Service manifest: capabilities, styles, formats, input modes, endpoints. |
 | GET | `/x402/status` | none | — | Payment config: per-route prices, network, payTo. |
