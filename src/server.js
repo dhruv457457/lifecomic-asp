@@ -64,6 +64,18 @@ const app = express();
 // Do NOT change this to `true`: that trusts the whole XFF chain and lets an attacker mint
 // unlimited rate-limit buckets to bypass the drain protection.
 app.set("trust proxy", 1);
+// CORS: PAYMENT-REQUIRED is a custom response header, so without explicit exposure a browser/JS-based
+// caller (buyer agent, validator) can't read it cross-origin even though curl sees it fine — CORS is a
+// browser-only restriction. A currently-listed x402 service on this marketplace flags exactly this in
+// its own source ("wildcard breaks x402 validator" without the explicit expose/allow headers below).
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, PAYMENT-SIGNATURE, X-Payment");
+  res.header("Access-Control-Expose-Headers", "PAYMENT-REQUIRED, PAYMENT-RESPONSE");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 app.use(express.json({ limit: "1mb" }));
 app.use("/files", express.static(OUTPUT_ROOT));
 // Landing page, served same-origin so its demo box can call /mcp/preview without CORS.
@@ -299,6 +311,21 @@ app.post("/mcp", asyncRoute(async (req, res, next) => {
   const out = await handleMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) });
   if (out === null) return res.status(202).end();
   res.json(out);
+}));
+
+// GET /mcp — some x402 validators/reviewers probe with a plain GET (a real, currently-listed
+// service on this marketplace does this: it 402s on GET too, not 404). MCP's JSON-RPC discovery
+// methods are POST-only per spec, so a GET here can't carry a method/params body anyway — treat it
+// the same as an unauthenticated tools/call attempt and gate it on payment rather than 404ing.
+app.get("/mcp", asyncRoute(async (req, res, next) => {
+  if (!mcpPaymentMiddleware) {
+    return res.status(503).json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "payments not configured" } });
+  }
+  return mcpPaymentMiddleware(req, res, (err) => {
+    if (err) return next(err);
+    // A GET has no JSON-RPC body to act on; once paid, point the caller at the real POST call.
+    res.json({ jsonrpc: "2.0", id: null, result: { message: "Payment verified. POST a tools/call request to this same URL to generate your comic." } });
+  });
 }));
 
 app.get("/jobs/:jobId", (req, res) => {

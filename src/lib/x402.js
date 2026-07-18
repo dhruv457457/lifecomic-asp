@@ -93,9 +93,17 @@ export async function createX402Middleware() {
     if (params?.name === "make_book") return bookPrice(params?.arguments?.pages);
     return config.routePrices["POST /mcp/comic"];
   };
+  // GET /mcp is ALSO gated (same price) — some x402 validators probe with a plain GET expecting a
+  // 402, and the underlying payment middleware keys on "METHOD /path" internally, so GET needs its
+  // own registered entry or it's silently treated as an unprotected route and passed through free.
   const mcpRoutes = {
     "POST /mcp": {
       accepts: { scheme: "exact", network: config.network, payTo: config.payTo, price: mcpPrice },
+      description: "LifeComic MCP tool call (make_comic / make_book)",
+      mimeType: "application/json",
+    },
+    "GET /mcp": {
+      accepts: { scheme: "exact", network: config.network, payTo: config.payTo, price: config.routePrices["POST /mcp/comic"] },
       description: "LifeComic MCP tool call (make_comic / make_book)",
       mimeType: "application/json",
     },
