@@ -267,22 +267,31 @@ app.post("/mcp/book", asyncRoute(async (req, res) => {
   await deliverRender(req, res, { ...req.body, format: "mini_book_4_pages", pages }, { pages });
 }));
 
-// MCP JSON-RPC endpoint — the interface OKX.AI's A2MCP layer speaks. `initialize` / `tools/list` are
-// FREE (discovery); `tools/call` is x402-gated (payment verified + settled before we render). This is
-// the single-endpoint MCP shape listed generators use; the REST routes above stay for the web demo.
+// MCP JSON-RPC endpoint — the interface OKX.AI's A2MCP layer speaks. Only a short allowlist of
+// discovery methods is FREE; everything else (including a malformed/empty/unrecognized body, which is
+// exactly what a generic x402 validator probe looks like) is treated as requiring payment and hits the
+// 402 gate. Getting this backwards — defaulting to free unless the body says "tools/call" — meant a
+// bare `POST {}` (OKX's own documented x402 self-check pattern) silently returned 202 instead of a 402
+// challenge, which is what caused repeated "has not passed x402 standard validation" rejections.
+const FREE_MCP_METHODS = new Set(["initialize", "tools/list", "ping", "notifications/initialized", "initialized"]);
+
 app.post("/mcp", asyncRoute(async (req, res, next) => {
-  if (req.body?.method === "tools/call") {
+  const isFree = FREE_MCP_METHODS.has(req.body?.method);
+  if (!isFree) {
     if (!mcpPaymentMiddleware) {
       return res.status(503).json({ jsonrpc: "2.0", id: req.body?.id ?? null, error: { code: -32000, message: "payments not configured" } });
     }
-    // Reject malformed calls (unknown tool / missing story) BEFORE charging.
-    const invalid = validateToolCall(req.body);
-    if (invalid) return res.json(invalid);
+    // Reject malformed tools/call bodies (unknown tool) BEFORE charging; anything else — including a
+    // missing/unrecognized method — falls through to the payment gate rather than a free no-op.
+    if (req.body?.method === "tools/call") {
+      const invalid = validateToolCall(req.body);
+      if (invalid) return res.json(invalid);
+    }
     // Gate payment; the middleware 402s an unpaid call itself, and calls our callback once paid+settled.
     return mcpPaymentMiddleware(req, res, (err) => {
       if (err) return next(err);
       handleMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) })
-        .then((out) => (out === null ? res.status(202).end() : res.json(out)))
+        .then((out) => (out === null ? res.json({ jsonrpc: "2.0", id: req.body?.id ?? null, result: {} }) : res.json(out)))
         .catch(next);
     });
   }
