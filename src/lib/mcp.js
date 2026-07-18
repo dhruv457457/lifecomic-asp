@@ -179,3 +179,29 @@ export async function handleMcpRequest(body, { runComic, baseUrl }) {
       return rpcError(id, -32601, `method not found: ${method}`);
   }
 }
+
+const KNOWN_MCP_METHODS = new Set(["initialize", "tools/list", "ping", "tools/call", "notifications/initialized", "initialized"]);
+
+/**
+ * Post-payment dispatch — the buyer HAS ALREADY PAID, so this must never return an empty result. If
+ * the body is a recognized MCP call, dispatch it normally. Otherwise (empty body, no method, or a
+ * non-JSON-RPC shape like `{"prompt":"..."}` — common when a buyer's "direct use" flow pays and
+ * replays WITHOUT first discovering our tools/call schema, especially now that tools/list is gated)
+ * we STILL render a comic, extracting the story from wherever it is in the raw body and falling back
+ * to a generic one. This mirrors how tolerant plain-x402 services (e.g. DejaVu) always deliver after
+ * payment instead of returning `{}`.
+ */
+export async function handlePaidMcpRequest(body, { runComic, baseUrl }) {
+  if (KNOWN_MCP_METHODS.has(body?.method)) {
+    const out = await handleMcpRequest(body, { runComic, baseUrl });
+    if (out !== null) return out; // notification (null) falls through to deliver a comic anyway
+  }
+  // Paid, but not a content-producing MCP call → deliver a comic from whatever's in the body.
+  try {
+    const request = toRenderRequest("make_comic", body || {});
+    const rendered = await runComic(request, { withArt: true, baseUrl });
+    return rpcResult(body?.id ?? null, toolResultContent("make_comic", rendered));
+  } catch (error) {
+    return rpcError(body?.id ?? null, -32000, `generation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}

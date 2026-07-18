@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createComic } from "./comic.js";
 import { generateStoryboard } from "./lib/storyboard-llm.js";
 import { createX402Middleware, getX402Config, clampBookPages } from "./lib/x402.js";
-import { handleMcpRequest, validateToolCall } from "./lib/mcp.js";
+import { handleMcpRequest, handlePaidMcpRequest, validateToolCall } from "./lib/mcp.js";
 import { uploadComic, storageEnabled } from "./lib/storage.js";
 import { createRateLimiter, createSpendBudget, redisEnabled } from "./lib/limiter.js";
 
@@ -297,10 +297,12 @@ app.post("/mcp", asyncRoute(async (req, res, next) => {
     if (invalid) return res.json(invalid);
   }
   // Gate payment; the middleware 402s an unpaid request itself, and calls our callback once paid+settled.
+  // Post-payment we use handlePaidMcpRequest, which ALWAYS returns a comic deliverable (never `{}`) —
+  // a buyer who paid but sent a non-tools/call body still gets their comic.
   return mcpPaymentMiddleware(req, res, (err) => {
     if (err) return next(err);
-    handleMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) })
-      .then((out) => (out === null ? res.json({ jsonrpc: "2.0", id: req.body?.id ?? null, result: {} }) : res.json(out)))
+    handlePaidMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) })
+      .then((out) => res.json(out))
       .catch(next);
   });
 }));
