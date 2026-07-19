@@ -20,7 +20,14 @@ export async function createComic(request, options = {}) {
 
   let art = { generated: 0, failed: 0, cost: 0, skipped: withArt ? undefined : "art_disabled" };
   if (withArt) {
-    art = await generatePanels(storyboard, outputDir, { concurrency: options.concurrency ?? 4, characterReference: options.characterReference !== false });
+    // The character-reference sheet is an extra BLOCKING image generated before the panels, adding
+    // ~6-8s. For a single page the 4 panels are already conditioned on the same character description,
+    // so we skip it to roughly halve render time (~18s → ~10s) — important for staying inside a
+    // paid-call / review timeout. Multi-page books keep the reference (consistency matters more across
+    // pages, and books are inherently slower anyway). Overridable via options.characterReference.
+    const multiPage = (storyboard.pages?.length ?? 1) > 1;
+    const characterReference = options.characterReference ?? multiPage;
+    art = await generatePanels(storyboard, outputDir, { concurrency: options.concurrency ?? 4, characterReference });
     await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
   }
 
