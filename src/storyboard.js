@@ -1,9 +1,16 @@
 import slugify from "slugify";
+import { normalizeArtDirection, artDirectionClause } from "./lib/art-direction.js";
 
 const defaultCharacter = {
   name: "Main Character",
   description: "expressive everyday person, relatable and cinematic"
 };
+
+const STYLE_RULES = [
+  "Generate artwork without text inside the panels.",
+  "Use consistent character appearance across panels.",
+  "Keep backgrounds readable and not too busy."
+];
 
 const pageTitles = ["The Wake-Up", "The Spiral", "The Almost-Quit", "The Spark"];
 
@@ -38,14 +45,16 @@ export function buildStoryboard(request) {
   const title = request.title || "The Deadline Arc";
   const comicId = `comic_${slugify(title, { lower: true, strict: true })}`;
   const character = request.characters?.[0] || defaultCharacter;
+  const artDirection = normalizeArtDirection(request.artDirection);
 
   return {
     comic_id: comicId,
     title,
     format: request.format || "mini_book_4_pages",
-    style: request.style || "slice_of_life_manga",
-    tone: request.tone || "warm_funny",
+    style: artDirection?.style || request.style || "slice_of_life_manga",
+    tone: artDirection?.tone || request.tone || "warm_funny",
     source_story: request.story,
+    art_direction: artDirection,
     character_bible: {
       characters: [
         {
@@ -55,11 +64,7 @@ export function buildStoryboard(request) {
           continuity_notes: "Keep the same outfit, face shape, hairstyle, and emotional expressiveness across every panel."
         }
       ],
-      style_rules: [
-        "Generate artwork without text inside the panels.",
-        "Use consistent character appearance across panels.",
-        "Keep backgrounds readable and not too busy."
-      ]
+      style_rules: STYLE_RULES
     },
     pages: pageTitles.map((pageTitle, pageIndex) => ({
       page: pageIndex + 1,
@@ -70,18 +75,19 @@ export function buildStoryboard(request) {
         beat,
         caption,
         dialogue: [{ speaker: character.name || defaultCharacter.name, text: dialogue }],
-        image_prompt: makeImagePrompt(request, character, beat)
+        image_prompt: makeImagePrompt(request, character, beat, artDirection)
       }))
     })),
     social_caption: "Some days do not make sense until they become a story."
   };
 }
 
-function makeImagePrompt(request, character, beat) {
+function makeImagePrompt(request, character, beat, artDirection) {
   return [
-    `Style: ${request.style || "slice-of-life manga"}, expressive comic art, clean composition.`,
-    `Character: ${character.description || defaultCharacter.description}.`,
+    `Style: ${artDirection?.style || request.style || "slice-of-life manga"}, expressive comic art, clean composition.${artDirectionClause(artDirection)}`,
+    `Character: ${character.description || defaultCharacter.description}. ${character.continuity_notes || ""}`.trim(),
     `Scene beat: ${beat}`,
+    STYLE_RULES.join(" "),
     "No text, no captions, no speech bubbles, no watermarks."
   ].join(" ");
 }

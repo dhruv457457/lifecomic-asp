@@ -47,13 +47,13 @@ const SERVICE = {
 };
 
 const ENDPOINTS = {
-  mcp: { path: "/mcp", method: "POST", auth: "x402 (tools/call only)", purpose: "MCP JSON-RPC endpoint (the A2MCP interface). initialize + tools/list are free discovery; tools/call (make_comic, make_book) is x402-gated and renders synchronously. This is the endpoint registered on OKX.AI.", input: "JSON-RPC 2.0 — tools: make_comic { story, style?, tone?, characters? }, make_book { story, pages?: 2-12, style?, tone?, characters? }" },
+  mcp: { path: "/mcp", method: "POST", auth: "x402 (tools/call only)", purpose: "MCP JSON-RPC endpoint (the A2MCP interface). initialize + tools/list are free discovery; tools/call (make_comic, make_book) is x402-gated and renders synchronously. This is the endpoint registered on OKX.AI.", input: "JSON-RPC 2.0 — tools: make_comic { story, style?, tone?, characters?, artDirection?, storyboard? }, make_book { story, pages?: 2-12, style?, tone?, characters?, artDirection?, storyboard? }. artDirection = { style?, tone?, medium?, palette?, lineWeight?, lighting?, referenceImages?: string[] } pins one visual identity across the whole book. A Mode-B storyboard panel may carry its own finished art via image_url (hosted, preferred) or image_data (base64) — those panels skip generation (bring-your-own-art)." },
   health: { path: "/health", method: "GET", auth: "none", purpose: "Liveness + version." },
   x402Status: { path: "/x402/status", method: "GET", auth: "none", purpose: "Payment config: per-route prices, network, payTo." },
   preview: { path: "/mcp/preview", method: "POST", auth: "none", purpose: "Free placeholder comic page (no art) — try the layout before paying.", input: "{ story, style?, tone?, characters? }" },
   storyboard: { path: "/mcp/storyboard", method: "POST", auth: "x402", purpose: "Text-only comic script: title, per-panel beats/captions/dialogue, art prompts, social caption.", input: "{ story, style?, tone?, format?, characters? }" },
-  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG, delivered in the paid response (typically 15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?}]}]} }" },
-  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Delivered in the paid response (typically 30-90s); if a render runs unusually long you get a jobId to poll at /jobs/:jobId instead. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters? }" },
+  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG, delivered in the paid response (typically 15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters?, artDirection? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?, image_url?, image_data?}]}]} }. artDirection = { style?, tone?, medium?, palette?, lineWeight?, lighting?, referenceImages?: string[] } enforces one visual identity across all panels. Per-panel image_url (hosted, preferred) / image_data (base64) supplies your own art and skips generation." },
+  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Delivered in the paid response (typically 30-90s); if a render runs unusually long you get a jobId to poll at /jobs/:jobId instead. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters?, artDirection? }. Supply per-panel image_url on every panel for a fully bring-your-own-art book (story + lettering + layout + PDF only; use image_url, not base64, for books)." },
   jobStatus: { path: "/jobs/:jobId", method: "GET", auth: "none", purpose: "Poll an async book job for status + finished file URLs." },
 };
 
@@ -76,7 +76,10 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
-app.use(express.json({ limit: "1mb" }));
+// 12mb (was 1mb) so a Mode-B storyboard carrying a few base64 `image_data` panels can be parsed. This
+// is a parse-size ceiling only — the real per-image memory bound is enforced in panels.js (8mb decoded).
+// Books/large comics should use per-panel `image_url` instead: base64 for 48 panels can't fit any body.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "12mb" }));
 app.use("/files", express.static(OUTPUT_ROOT));
 // Landing page, served same-origin so its demo box can call /mcp/preview without CORS.
 app.use(express.static(path.join(ROOT, "web/landing")));
@@ -167,9 +170,9 @@ app.get("/service", (_req, res) =>
     styles: ["slice-of-life manga", "pixar-style 3d", "noir ink", "cyberpunk", "watercolor", "newspaper strip"],
     formats: ["single_page", "mini_book_4_pages", "life_chapter_8_pages"],
     inputModes: {
-      raw: "Send { story } and OUR model writes the storyboard for you. Simplest.",
+      raw: "Send { story } and OUR model writes the storyboard for you. Simplest. Add { artDirection } to pin one visual identity (style, medium, palette, line weight, lighting, reference images) across the whole book.",
       structured:
-        "Recommended for agent callers: send { storyboard } that YOU composed with your own (stronger) model — title, characters, per-panel beats, captions, dialogue, and optional per-panel image_prompt. We skip our LLM and render your vision directly. Panel count is clamped to the paid tier, so cost is fixed regardless of what you send.",
+        "Recommended for agent callers: send { storyboard } that YOU composed with your own (stronger) model — title, characters, per-panel beats, captions, dialogue, and optional per-panel image_prompt. We skip our LLM and render your vision directly. Bring your own art: give a panel image_url (hosted, preferred) or image_data (base64) and we skip generation for it — supply it on every panel for a story+lettering+PDF-only book. Add { artDirection } to enforce consistency. Panel count is clamped to the paid tier, so cost is fixed regardless of what you send.",
     },
     endpoints: ENDPOINTS,
   }),
@@ -329,7 +332,14 @@ app.get("/jobs/:jobId", (req, res) => {
 });
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
-app.use((error, _req, res, _next) => res.status(400).json({ error: error instanceof Error ? error.message : "Unexpected error" }));
+app.use((error, _req, res, _next) => {
+  // Oversized body — almost always a caller stuffing base64 `image_data` for many panels. Point them
+  // at the field that scales (per-panel `image_url`) instead of an opaque parse failure.
+  if (error?.type === "entity.too.large" || error?.status === 413) {
+    return res.status(413).json({ error: "Request body too large. For bring-your-own-art, use per-panel 'image_url' (a hosted URL) instead of base64 'image_data', especially for multi-page books." });
+  }
+  res.status(400).json({ error: error instanceof Error ? error.message : "Unexpected error" });
+});
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {

@@ -18,15 +18,17 @@ export async function createComic(request, options = {}) {
   assignLayout(storyboard); // varied panel rects + per-panel aspect ratio, before any art is generated
   await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
 
-  let art = { generated: 0, failed: 0, cost: 0, skipped: withArt ? undefined : "art_disabled" };
+  let art = { generated: 0, external: 0, failed: 0, cost: 0, skipped: withArt ? undefined : "art_disabled" };
   if (withArt) {
     // The character-reference sheet is an extra BLOCKING image generated before the panels, adding
     // ~6-8s. For a single page the 4 panels are already conditioned on the same character description,
     // so we skip it to roughly halve render time (~18s → ~10s) — important for staying inside a
     // paid-call / review timeout. Multi-page books keep the reference (consistency matters more across
-    // pages, and books are inherently slower anyway). Overridable via options.characterReference.
+    // pages, and books are inherently slower anyway). A caller-supplied artDirection makes the reference
+    // mandatory regardless of page count — enforcing one visual identity start-to-end is the whole point
+    // of that field. Overridable via options.characterReference.
     const multiPage = (storyboard.pages?.length ?? 1) > 1;
-    const characterReference = options.characterReference ?? multiPage;
+    const characterReference = options.characterReference ?? (multiPage || Boolean(storyboard.art_direction));
     art = await generatePanels(storyboard, outputDir, { concurrency: options.concurrency ?? 4, characterReference });
     await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
   }
@@ -40,7 +42,7 @@ export async function createComic(request, options = {}) {
     status: withArt ? (art.failed ? "rendered_partial_art" : "rendered") : "rendered_placeholder",
     title: storyboard.title,
     storyboardSource: source,
-    art: { generated: art.generated, failed: art.failed },
+    art: { generated: art.generated, external: art.external ?? 0, failed: art.failed },
     cost: Number((Number(storyboardCost || 0) + Number(art.cost || 0)).toFixed(6)),
     files,
     storyboard,

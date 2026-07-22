@@ -19,6 +19,25 @@ const characterSchema = {
   },
 };
 
+const artDirectionSchema = {
+  type: "object",
+  description: "Optional design chart pinning ONE visual identity across every panel of the whole book — enforced from the first panel to the last. Supplying it makes the character-reference sheet mandatory.",
+  properties: {
+    style: { type: "string", description: "Overall art style — e.g. manga, ghibli-esque, western superhero, noir ink, watercolor storybook, photoreal-cinematic." },
+    tone: { type: "string", description: "Mood — e.g. funny, dramatic, hopeful, chaotic." },
+    medium: { type: "string", description: "Art medium — e.g. inked comic, digital painting, watercolor, cel-shaded 3D." },
+    palette: { type: "string", description: "Color palette — e.g. warm pastels, high-contrast neon, muted earth tones." },
+    lineWeight: { type: "string", description: "Line treatment — e.g. bold heavy ink, fine delicate lines, sketchy." },
+    lighting: { type: "string", description: "Lighting mood — e.g. soft golden hour, dramatic chiaroscuro, flat daylight." },
+    referenceImages: { type: "array", items: { type: "string" }, description: "Up to 3 https:// or data:image/ URLs of your own character/style references. When given, they anchor consistency instead of an auto-generated reference sheet." },
+  },
+};
+
+const storyboardSchema = {
+  type: "object",
+  description: "Optional Mode B: a full storyboard YOU composed with your own (stronger) model — we skip our LLM and render it directly. Shape: { title, style, characters:[...], pages:[{ page_title, panels:[{ beat, caption, dialogue, image_prompt?, image_url?, image_data? }] }] }. Bring your own art: a panel with image_url (hosted, preferred) or image_data (base64) skips generation for that panel; supply it on every panel for a story+lettering+layout+PDF-only book.",
+};
+
 // Tool definitions advertised by tools/list. `execution.taskSupport: "forbidden"` marks these as
 // synchronous MCP calls (not A2A tasks), matching how listed A2MCP generators declare themselves.
 export const MCP_TOOLS = [
@@ -34,6 +53,8 @@ export const MCP_TOOLS = [
         style: { type: "string", description: "Optional art style — e.g. manga, pixar, noir, cyberpunk. Defaults to manga." },
         tone: { type: "string", description: "Optional mood — e.g. funny, dramatic, hopeful, chaotic." },
         characters: characterSchema,
+        artDirection: artDirectionSchema,
+        storyboard: storyboardSchema,
       },
       required: ["story"],
     },
@@ -52,6 +73,8 @@ export const MCP_TOOLS = [
         style: { type: "string", description: "Optional art style — e.g. manga, pixar, noir, cyberpunk. Defaults to manga." },
         tone: { type: "string", description: "Optional mood — e.g. funny, dramatic, hopeful, chaotic." },
         characters: characterSchema,
+        artDirection: artDirectionSchema,
+        storyboard: storyboardSchema,
       },
       required: ["story"],
     },
@@ -105,7 +128,7 @@ export function validateToolCall(body) {
 
 /** Maps a tool call to the createComic request shape, tolerant of imperfect agent argument mapping. */
 function toRenderRequest(name, args = {}) {
-  const base = { style: args.style, tone: args.tone, characters: args.characters };
+  const base = { style: args.style, tone: args.tone, characters: args.characters, artDirection: args.artDirection };
   if (args.storyboard && typeof args.storyboard === "object") base.storyboard = args.storyboard;
   else base.story = extractStory(args) || FALLBACK_STORY;
   if (name === "make_book") return { ...base, format: "mini_book_4_pages", pages: clampBookPages(args.pages) };

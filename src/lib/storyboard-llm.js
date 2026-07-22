@@ -1,6 +1,7 @@
 import slugify from "slugify";
 import { chatJSON, isConfigured } from "./openrouter.js";
 import { buildStoryboard as buildTemplateStoryboard } from "../storyboard.js";
+import { normalizeArtDirection, artDirectionClause } from "./art-direction.js";
 
 // format -> page/panel layout. All layouts are 4-panel grids for now (renderer assumption).
 export const FORMATS = {
@@ -27,13 +28,14 @@ export function clampPages(n) {
  * every panel (the cheap, reliable path to character consistency), and text is explicitly banned so
  * the renderer — not the image model — owns all captions and dialogue.
  */
-function buildPanelImagePrompt({ style, character, beat, tone }) {
+function buildPanelImagePrompt({ style, character, beat, tone, artDirection, styleRules }) {
   return [
-    `Single ${style} comic panel, expressive comic art, clean composition, ${tone} mood.`,
-    `Consistent recurring character: ${character.visual_description}. Keep the same face, hair, and outfit in every panel.`,
+    `Single ${style} comic panel, expressive comic art, clean composition, ${tone} mood.${artDirectionClause(artDirection)}`,
+    `Consistent recurring character: ${character.visual_description}. Keep the same face, hair, and outfit in every panel. ${character.continuity_notes || ""}`.trim(),
     `Scene: ${beat}`,
+    styleRules?.length ? styleRules.join(" ") : null,
     "Wide panel framing. Absolutely no text, no captions, no speech bubbles, no letters, no signs, no watermark.",
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 }
 
 function normalizeStoryboard(request, llm) {
@@ -42,8 +44,9 @@ function normalizeStoryboard(request, llm) {
   // An explicit numeric `pages` (2–12) overrides the named format's page count; panels stay at 4/page.
   const pageCount = clampPages(request.pages) ?? fmt.pages;
   const title = String(llm.title || request.title || "Untitled Day").slice(0, 80);
-  const style = request.style || llm.style || "slice-of-life manga";
-  const tone = request.tone || llm.tone || "warm and honest";
+  const artDirection = normalizeArtDirection(request.artDirection);
+  const style = artDirection?.style || request.style || llm.style || "slice-of-life manga";
+  const tone = artDirection?.tone || request.tone || llm.tone || "warm and honest";
 
   const character = {
     id: "char_main",
@@ -52,8 +55,17 @@ function normalizeStoryboard(request, llm) {
       llm.characters?.[0]?.visual_description ||
       request.characters?.[0]?.description ||
       "expressive everyday person, relatable and cinematic",
-    continuity_notes: "Keep the same outfit, face shape, hairstyle, and expressiveness across every panel.",
+    continuity_notes:
+      llm.characters?.[0]?.continuity_notes ||
+      request.characters?.[0]?.continuity_notes ||
+      "Keep the same outfit, face shape, hairstyle, and expressiveness across every panel.",
   };
+
+  const styleRules = [
+    "Generate artwork without text inside the panels.",
+    "Use consistent character appearance across panels.",
+    "Keep backgrounds readable and not too busy.",
+  ];
 
   const llmPages = Array.isArray(llm.pages) ? llm.pages : [];
   const pages = [];
@@ -79,16 +91,28 @@ function normalizeStoryboard(request, llm) {
         }))
         .filter((d) => d.text)
         .slice(0, 2);
-      panels.push({
+      // A caller (buyer agent) may supply its own richer art prompt; otherwise we build one. When the
+      // caller wrote the prompt AND set artDirection, append the design-chart clause so the visual
+      // identity is enforced regardless of who authored the prompt. The freshly-built path already
+      // includes the clause inside buildPanelImagePrompt, so it must NOT be appended again there.
+      const image_prompt = panel.image_prompt
+        ? String(panel.image_prompt).slice(0, 1400) + artDirectionClause(artDirection)
+        : buildPanelImagePrompt({ style, character, beat, tone, artDirection, styleRules });
+      const built = {
         panel: i + 1,
         beat,
         caption,
         dialogue,
-        // A caller (buyer agent) may supply its own richer art prompt; otherwise we build one.
-        image_prompt: panel.image_prompt
-          ? String(panel.image_prompt).slice(0, 1400)
-          : buildPanelImagePrompt({ style, character, beat, tone }),
-      });
+        image_prompt,
+      };
+      // Bring-your-own-art: a caller can supply finished panel art (a hosted URL, or base64 for small
+      // submissions) instead of triggering generation. Materialized in generatePanels; renderer-agnostic.
+      if (typeof panel.image_url === "string" && /^https?:\/\//.test(panel.image_url.trim())) {
+        built.image_url = panel.image_url.trim().slice(0, 2000);
+      } else if (typeof panel.image_data === "string" && panel.image_data.trim()) {
+        built.image_data = panel.image_data.trim();
+      }
+      panels.push(built);
     }
     pages.push({
       page: p + 1,
@@ -106,13 +130,10 @@ function normalizeStoryboard(request, llm) {
     style,
     tone,
     source_story: request.story,
+    art_direction: artDirection,
     character_bible: {
       characters: [character],
-      style_rules: [
-        "Generate artwork without text inside the panels.",
-        "Use consistent character appearance across panels.",
-        "Keep backgrounds readable and not too busy.",
-      ],
+      style_rules: styleRules,
     },
     pages,
     social_caption: String(llm.social_caption || "Some days don't make sense until they become a story.").slice(0, 200),
