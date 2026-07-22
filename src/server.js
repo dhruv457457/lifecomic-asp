@@ -10,6 +10,7 @@ import { createX402Middleware, getX402Config, clampBookPages } from "./lib/x402.
 import { handleMcpRequest, handlePaidMcpRequest, validateToolCall } from "./lib/mcp.js";
 import { uploadComic, storageEnabled } from "./lib/storage.js";
 import { createRateLimiter, createSpendBudget, redisEnabled } from "./lib/limiter.js";
+import { loadSeries, saveSeries, applySeriesDefaults } from "./lib/series.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -52,8 +53,8 @@ const ENDPOINTS = {
   x402Status: { path: "/x402/status", method: "GET", auth: "none", purpose: "Payment config: per-route prices, network, payTo." },
   preview: { path: "/mcp/preview", method: "POST", auth: "none", purpose: "Free placeholder comic page (no art) — try the layout before paying.", input: "{ story, style?, tone?, characters? }" },
   storyboard: { path: "/mcp/storyboard", method: "POST", auth: "x402", purpose: "Text-only comic script: title, per-panel beats/captions/dialogue, art prompts, social caption.", input: "{ story, style?, tone?, format?, characters? }" },
-  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG, delivered in the paid response (typically 15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters?, artDirection? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?, image_url?, image_data?}]}]} }. artDirection = { style?, tone?, medium?, palette?, lineWeight?, lighting?, referenceImages?: string[] } enforces one visual identity across all panels. Per-panel image_url (hosted, preferred) / image_data (base64) supplies your own art and skips generation." },
-  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Delivered in the paid response (typically 30-90s); if a render runs unusually long you get a jobId to poll at /jobs/:jobId instead. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters?, artDirection? }. Supply per-panel image_url on every panel for a fully bring-your-own-art book (story + lettering + layout + PDF only; use image_url, not base64, for books)." },
+  comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG, delivered in the paid response (typically 15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters?, artDirection?, seriesId? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?, image_url?, image_data?}]}]} }. artDirection = { style?, tone?, medium?, palette?, lineWeight?, lighting?, referenceImages?: string[] } enforces one visual identity across all panels. Per-panel image_url (hosted, preferred) / image_data (base64) supplies your own art and skips generation. seriesId ties this page to a multi-chapter story — see /mcp/book." },
+  book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Delivered in the paid response (typically 30-90s); if a render runs unusually long you get a jobId to poll at /jobs/:jobId instead. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters?, artDirection?, seriesId? }. Supply per-panel image_url on every panel for a fully bring-your-own-art book (story + lettering + layout + PDF only; use image_url, not base64, for books). seriesId (any string you choose) continues a multi-chapter story: pass the SAME seriesId on later calls and the cast/style/tone/artDirection (and the actual reference art, once generated) carry over automatically — only send the new chapter's story/beats. The response echoes seriesId + chapterNumber so you can track it. Before calling, ask your user how many pages this chapter should be and whether they want just this chapter now or the whole story — each chapter is a separate paid call." },
   jobStatus: { path: "/jobs/:jobId", method: "GET", auth: "none", purpose: "Poll an async book job for status + finished file URLs." },
 };
 
@@ -130,10 +131,18 @@ function fileUrls(id, files, baseUrl = BASE_URL) {
   };
 }
 
+// A `seriesId` on the request continues a multi-chapter story: prior chapters' cast/style/tone/
+// artDirection (and, once storage is configured, the actual reference art) fill in whatever the
+// caller didn't explicitly send, so chapter 2+ only needs the new beat. Best-effort throughout — a
+// Redis outage just means the chapter renders standalone instead of continuing the series.
 async function runComic(request, { withArt = true, baseUrl = BASE_URL } = {}) {
+  const seriesId = typeof request.seriesId === "string" ? request.seriesId.trim().slice(0, 100) : null;
+  const priorSeries = seriesId ? await loadSeries(seriesId) : null;
+  const resolvedRequest = priorSeries ? applySeriesDefaults(request, priorSeries) : request;
+
   const id = `comic_${randomUUID().slice(0, 8)}`;
   const outputDir = path.join(OUTPUT_ROOT, id);
-  const result = await createComic(request, { outputDir, withArt });
+  const result = await createComic(resolvedRequest, { outputDir, withArt, seriesId });
   // Upload to durable storage (Cloudinary) when configured so files survive redeploys; on any
   // failure or when disabled, fall back to serving from local disk.
   let hosted = null;
@@ -142,6 +151,7 @@ async function runComic(request, { withArt = true, baseUrl = BASE_URL } = {}) {
   } catch (error) {
     console.warn("[storage] upload failed, serving locally:", error instanceof Error ? error.message : error);
   }
+  const chapterNumber = seriesId ? await saveSeries(seriesId, result.storyboard) : null;
   return {
     id,
     title: result.title,
@@ -152,6 +162,7 @@ async function runComic(request, { withArt = true, baseUrl = BASE_URL } = {}) {
     storage: hosted ? "cloudinary" : "local",
     social_caption: result.storyboard.social_caption,
     files: hosted ?? fileUrls(id, result.files, baseUrl),
+    ...(seriesId ? { seriesId, chapterNumber } : {}),
   };
 }
 
@@ -173,6 +184,8 @@ app.get("/service", (_req, res) =>
       raw: "Send { story } and OUR model writes the storyboard for you. Simplest. Add { artDirection } to pin one visual identity (style, medium, palette, line weight, lighting, reference images) across the whole book.",
       structured:
         "Recommended for agent callers: send { storyboard } that YOU composed with your own (stronger) model — title, characters, per-panel beats, captions, dialogue, and optional per-panel image_prompt. We skip our LLM and render your vision directly. Bring your own art: give a panel image_url (hosted, preferred) or image_data (base64) and we skip generation for it — supply it on every panel for a story+lettering+PDF-only book. Add { artDirection } to enforce consistency. Panel count is clamped to the paid tier, so cost is fixed regardless of what you send.",
+      series:
+        "Multi-chapter stories: pass the same { seriesId } (any string) on /mcp/book calls for each chapter. Cast, style/tone, and art direction — including the actual reference art once generated — carry over automatically; only send that chapter's new story. Each chapter is its own paid call. Ask the user how many pages this chapter should be, and whether they want the whole arc now or just chapter 1.",
     },
     endpoints: ENDPOINTS,
   }),

@@ -53,3 +53,17 @@ export async function uploadComic(id, files) {
   if (socialCaption) out.socialCaption = socialCaption;
   return out;
 }
+
+/**
+ * Uploads a comic's character-reference sheet and returns its durable URL, or null on failure/when
+ * storage is disabled. Only called for series-continuity chapters (see lib/series.js) — most one-off
+ * comics never need a persistent URL for their reference art, so this stays off the default path.
+ */
+export async function uploadCharacterReference(id, filePath) {
+  if (!storageEnabled()) return null;
+  try {
+    return await uploadOne(filePath, `lifecomic/${id}/panels`, { publicId: "character_ref" });
+  } catch {
+    return null;
+  }
+}

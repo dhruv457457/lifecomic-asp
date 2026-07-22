@@ -2,6 +2,7 @@ import fs from "fs-extra";
 import path from "node:path";
 import { generateImage, isConfigured, toDataUrl } from "./openrouter.js";
 import { artDirectionClause } from "./art-direction.js";
+import { uploadCharacterReference } from "./storage.js";
 
 /** Prompt for a one-off character sheet reused as a reference for every panel (consistency anchor). */
 function characterRefPrompt(characters, style, artDirection) {
@@ -102,7 +103,7 @@ async function mapLimit(items, limit, worker) {
  * retries (or a bad external image) is left without an image (the renderer falls back to placeholder
  * art for it), so a single bad panel never fails the comic. Returns { generated, external, failed, cost }.
  */
-export async function generatePanels(storyboard, outputDir, { concurrency = 4, retries = 1, characterReference = true } = {}) {
+export async function generatePanels(storyboard, outputDir, { concurrency = 4, retries = 1, characterReference = true, persistReference = false } = {}) {
   const panelsDir = path.join(outputDir, "panels");
   await fs.ensureDir(panelsDir);
 
@@ -136,6 +137,13 @@ export async function generatePanels(storyboard, outputDir, { concurrency = 4, r
       cost += ref.cost;
       storyboard.character_bible.reference_generated = true;
       storyboard.character_bible.reference_source = "generated";
+      // Series continuity needs a durable URL for THIS chapter's reference art (not just the base64
+      // dataUrl, which never leaves this process) so the next chapter can lock onto the same faces.
+      // Only bothered with for series chapters — a one-off comic never needs this extra upload.
+      if (persistReference) {
+        const url = await uploadCharacterReference(storyboard.comic_id, path.join(panelsDir, "_character_ref.png"));
+        if (url) storyboard.character_bible.reference_url = url;
+      }
     }
   }
   const castSize = storyboard.character_bible?.characters?.length || 1;

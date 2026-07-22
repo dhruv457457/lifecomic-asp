@@ -9,7 +9,7 @@ const NS = "lifecomic:";
 let redisClient;
 let redisTried = false;
 
-function getRedis() {
+export function getRedis() {
   if (redisTried) return redisClient;
   redisTried = true;
   const url = process.env.REDIS_URL;

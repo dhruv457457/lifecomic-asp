@@ -24,12 +24,16 @@ export async function createComic(request, options = {}) {
     // ~6-8s. For a single page the 4 panels are already conditioned on the same character description,
     // so we skip it to roughly halve render time (~18s → ~10s) — important for staying inside a
     // paid-call / review timeout. Multi-page books keep the reference (consistency matters more across
-    // pages, and books are inherently slower anyway). A caller-supplied artDirection makes the reference
-    // mandatory regardless of page count — enforcing one visual identity start-to-end is the whole point
-    // of that field. Overridable via options.characterReference.
+    // pages, and books are inherently slower anyway). A caller-supplied artDirection — or a seriesId,
+    // where continuity across chapters is the entire point — makes the reference mandatory regardless
+    // of page count. Overridable via options.characterReference.
     const multiPage = (storyboard.pages?.length ?? 1) > 1;
-    const characterReference = options.characterReference ?? (multiPage || Boolean(storyboard.art_direction));
-    art = await generatePanels(storyboard, outputDir, { concurrency: options.concurrency ?? 4, characterReference });
+    const characterReference = options.characterReference ?? (multiPage || Boolean(storyboard.art_direction) || Boolean(options.seriesId));
+    art = await generatePanels(storyboard, outputDir, {
+      concurrency: options.concurrency ?? 4,
+      characterReference,
+      persistReference: Boolean(options.seriesId),
+    });
     await fs.writeJson(path.join(outputDir, "storyboard.json"), storyboard, { spaces: 2 });
   }
 

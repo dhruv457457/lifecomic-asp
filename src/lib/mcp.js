@@ -38,6 +38,11 @@ const storyboardSchema = {
   description: "Optional Mode B: a full storyboard YOU composed with your own (stronger) model — we skip our LLM and render it directly. Shape: { title, style, characters:[...], pages:[{ page_title, panels:[{ beat, caption, dialogue, image_prompt?, image_url?, image_data? }] }] }. Bring your own art: a panel with image_url (hosted, preferred) or image_data (base64) skips generation for that panel; supply it on every panel for a story+lettering+layout+PDF-only book.",
 };
 
+const seriesIdSchema = {
+  type: "string",
+  description: "Optional: any string YOU choose to link chapters of the same multi-chapter story. Pass the SAME seriesId on the next chapter's call and the cast, style/tone, and art direction (including the actual reference art once generated) carry over automatically — you only need to send that chapter's new story/beats. The response echoes back `seriesId` and `chapterNumber`. Ask the user how many pages THIS chapter should be, and whether they want the whole story now or just chapter 1 to start — each chapter is its own paid call.",
+};
+
 // Tool definitions advertised by tools/list. `execution.taskSupport: "forbidden"` marks these as
 // synchronous MCP calls (not A2A tasks), matching how listed A2MCP generators declare themselves.
 export const MCP_TOOLS = [
@@ -45,7 +50,7 @@ export const MCP_TOOLS = [
     name: "make_comic",
     title: "Make a comic page",
     description:
-      "Turn a short real-life moment into a finished single comic page (4 panels) with character-consistent art, real speech bubbles, and a print-ready PDF. Call with ONE argument: `story` — a plain-text sentence or two describing the moment (e.g. \"I missed my train, spilled coffee, still got the job\"). Returns the comic's PDF and page-image URLs. Generation is synchronous and typically takes ~15-30 seconds. Priced per call in USDT.",
+      "Turn a short real-life moment into a finished single comic page (4 panels) with character-consistent art, real speech bubbles, and a print-ready PDF. Call with ONE argument: `story` — a plain-text sentence or two describing the moment (e.g. \"I missed my train, spilled coffee, still got the job\"). Returns the comic's PDF and page-image URLs. Generation is synchronous and typically takes ~15-30 seconds. Priced per call in USDT. If the user's request sounds like it needs more than one page, ask them whether they'd rather use make_book instead before calling this.",
     inputSchema: {
       type: "object",
       properties: {
@@ -55,6 +60,7 @@ export const MCP_TOOLS = [
         characters: characterSchema,
         artDirection: artDirectionSchema,
         storyboard: storyboardSchema,
+        seriesId: seriesIdSchema,
       },
       required: ["story"],
     },
@@ -64,17 +70,18 @@ export const MCP_TOOLS = [
     name: "make_book",
     title: "Make a comic book",
     description:
-      `Turn a story into a multi-page comic book (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES} pages, default ${BOOK_DEFAULT_PAGES}) with a cover, one consistent hero from cover to cliffhanger, and a print-ready PDF. Call with a plain-text 'story' argument and an optional 'pages' number. Returns the book's PDF and page-image URLs. Priced per page in USDT. Generation is synchronous and typically takes ~30-90 seconds depending on page count.`,
+      `Turn a story into a multi-page comic book (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES} pages, default ${BOOK_DEFAULT_PAGES}) with a cover, one consistent cast from cover to cliffhanger, and a print-ready PDF. Call with a plain-text 'story' argument and an optional 'pages' number. Returns the book's PDF and page-image URLs. Priced per page in USDT. Generation is synchronous and typically takes ~30-90 seconds depending on page count. BEFORE calling: if the user hasn't said how long they want it, ask how many pages (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES}). If the story sounds like it's part of a bigger, multi-chapter arc, ask whether they want the whole thing planned out now or just chapter 1 to start — for a multi-chapter story, use 'seriesId' (see its own field) so later chapters automatically keep the same cast and art style.`,
     inputSchema: {
       type: "object",
       properties: {
         story: { type: "string", minLength: 1, description: "REQUIRED. The story to turn into a comic book, as plain text. Just pass the user's request here." },
-        pages: { type: "integer", minimum: BOOK_MIN_PAGES, maximum: BOOK_MAX_PAGES, description: `Optional number of pages (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES}, default ${BOOK_DEFAULT_PAGES}). Priced per page.` },
+        pages: { type: "integer", minimum: BOOK_MIN_PAGES, maximum: BOOK_MAX_PAGES, description: `Optional number of pages (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES}, default ${BOOK_DEFAULT_PAGES}). Priced per page. Ask the user if they haven't said.` },
         style: { type: "string", description: "Optional art style — e.g. manga, pixar, noir, cyberpunk. Defaults to manga." },
         tone: { type: "string", description: "Optional mood — e.g. funny, dramatic, hopeful, chaotic." },
         characters: characterSchema,
         artDirection: artDirectionSchema,
         storyboard: storyboardSchema,
+        seriesId: seriesIdSchema,
       },
       required: ["story"],
     },
@@ -128,7 +135,7 @@ export function validateToolCall(body) {
 
 /** Maps a tool call to the createComic request shape, tolerant of imperfect agent argument mapping. */
 function toRenderRequest(name, args = {}) {
-  const base = { style: args.style, tone: args.tone, characters: args.characters, artDirection: args.artDirection };
+  const base = { style: args.style, tone: args.tone, characters: args.characters, artDirection: args.artDirection, seriesId: args.seriesId };
   if (args.storyboard && typeof args.storyboard === "object") base.storyboard = args.storyboard;
   else base.story = extractStory(args) || FALLBACK_STORY;
   if (name === "make_book") return { ...base, format: "mini_book_4_pages", pages: clampBookPages(args.pages) };
@@ -142,10 +149,11 @@ function toolResultContent(name, out) {
     out.files?.pdf ? `PDF: ${out.files.pdf}` : null,
     pages.length ? `Pages: ${pages.join("  ·  ")}` : null,
     out.social_caption ? `Caption: ${out.social_caption}` : null,
+    out.seriesId ? `Series "${out.seriesId}", chapter ${out.chapterNumber}. Reuse this seriesId for the next chapter.` : null,
   ].filter(Boolean);
   return {
     content: [{ type: "text", text: lines.join("\n") }],
-    structuredContent: { title: out.title, pdf: out.files?.pdf, pages, storage: out.storage },
+    structuredContent: { title: out.title, pdf: out.files?.pdf, pages, storage: out.storage, seriesId: out.seriesId, chapterNumber: out.chapterNumber },
   };
 }
 
