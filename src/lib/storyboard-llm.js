@@ -91,7 +91,7 @@ function normalizeStoryboard(request, llm) {
     for (let i = 0; i < fmt.panelsPerPage; i += 1) {
       const panel = srcPanels[i] || {};
       const beat = String(panel.beat || panel.scene || "A quiet beat in the story.").slice(0, 240);
-      const caption = String(panel.caption || "").slice(0, 120);
+      const caption = String(panel.caption || "").slice(0, 150);
       // Keep up to two dialogue lines so the renderer can show a two-speaker exchange. Accepts an
       // array of {speaker,text} (or bare strings) or a single string; empties are dropped.
       const rawDialogue = Array.isArray(panel.dialogue)
@@ -180,10 +180,14 @@ function storyboardPrompt(request) {
       : "",
     "",
     `Produce exactly ${pageCount} page(s), each with exactly ${fmt.panelsPerPage} panels (${totalPanels} panels total).`,
-    "Give the comic an evocative TITLE. For each panel provide a visual 'beat' (what we see), a short",
-    "narration 'caption' (<= 12 words), and one line of 'dialogue' (<= 12 words) attributed to one of the",
-    "cast above via a 'speaker' field. Keep the emotional arc coherent and end on a satisfying beat.",
-    "Also give one shareable 'social_caption'.",
+    "Give the comic an evocative TITLE. For each panel provide a visual 'beat' (what we see) and a",
+    "narration 'caption' (<= 18 words). Write the caption as vivid, atmospheric PROSE that carries the",
+    "scene's mood in its word choice — never a flat plot summary ('He ran, then he was gone' is weak;",
+    "something that makes the reader FEEL the moment is strong). Optionally add one line of 'dialogue'",
+    "(<= 14 words, natural spoken words a person would actually say) attributed to one of the cast above",
+    "via a 'speaker' field — OMIT dialogue entirely for a panel rather than writing a bare ellipsis or",
+    "wordless filler; a strong caption alone can carry a silent beat. Keep the emotional arc coherent and",
+    "end on a satisfying beat. Also give one shareable 'social_caption'.",
     "",
     "Return STRICT JSON only, this exact shape:",
     `{"title":"...","characters":[{"name":"...","visual_description":"..."}${chars.length > 1 ? ",{...}" : ""}],`,

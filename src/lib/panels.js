@@ -1,8 +1,33 @@
 import fs from "fs-extra";
 import path from "node:path";
+import sharp from "sharp";
 import { generateImage, isConfigured, toDataUrl } from "./openrouter.js";
 import { artDirectionClause } from "./art-direction.js";
 import { uploadCharacterReference } from "./storage.js";
+
+/**
+ * The image model sometimes letterboxes generated art with flat-color padding to hit an unusual
+ * aspect ratio (especially tall "hero" panels), leaving dead blank space baked into the pixels —
+ * cover-fit scaling in the renderer can't crop that away since it's real image content, not a
+ * canvas positioning issue. Trims uniform-color borders so every panel is full-bleed art; on any
+ * failure (or if trim would remove almost everything, signalling a false-positive on real
+ * artwork) falls back to the untrimmed buffer, so this never damages a normal image.
+ */
+async function trimPadding(buffer) {
+  try {
+    const { width: ow, height: oh } = await sharp(buffer).metadata();
+    const trimmed = await sharp(buffer).trim({ threshold: 24 }).toBuffer({ resolveWithObject: true });
+    const areaRatio = (trimmed.info.width * trimmed.info.height) / (ow * oh);
+    // Use the trim only when it removed a meaningful border (< 97% of original area survives —
+    // trivial trims aren't worth the risk) but didn't collapse to almost nothing (> 10% survives —
+    // near-total loss means the source was basically blank, and a sliver blown up to fill the panel
+    // would look worse than just keeping the untrimmed, if disappointing, original).
+    if (areaRatio < 0.97 && areaRatio > 0.1) return trimmed.data;
+    return buffer;
+  } catch {
+    return buffer;
+  }
+}
 
 /** Prompt for a one-off character sheet reused as a reference for every panel (consistency anchor). */
 function characterRefPrompt(characters, style, artDirection) {
@@ -38,8 +63,9 @@ async function generateCharacterReference(storyboard, panelsDir) {
   if (!characters.length) return null;
   try {
     const img = await generateImage(characterRefPrompt(characters, storyboard.style, storyboard.art_direction), { aspectRatio: "3:4", timeoutMs: IMAGE_TIMEOUT_MS });
-    await fs.writeFile(path.join(panelsDir, "_character_ref.png"), img.buffer);
-    return { dataUrl: toDataUrl(img), cost: img.cost ?? 0 };
+    const buffer = await trimPadding(img.buffer);
+    await fs.writeFile(path.join(panelsDir, "_character_ref.png"), buffer);
+    return { dataUrl: toDataUrl({ ...img, buffer }), cost: img.cost ?? 0 };
   } catch {
     return null;
   }
@@ -180,7 +206,7 @@ export async function generatePanels(storyboard, outputDir, { concurrency = 4, r
         const img = await generateImage(panel.image_prompt + refSuffix, { aspectRatio: panel.aspect_ratio, references, timeoutMs: IMAGE_TIMEOUT_MS });
         const ext = img.mime === "image/png" ? "png" : "jpg";
         const file = path.join(panelsDir, `p${page}_${panel.panel}.${ext}`);
-        await fs.writeFile(file, img.buffer);
+        await fs.writeFile(file, await trimPadding(img.buffer));
         panel.image_path = file;
         generated += 1;
         cost += img.cost ?? 0;

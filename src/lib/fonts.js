@@ -23,20 +23,26 @@ const available = new Set((GlobalFonts.families || []).map((f) => f.family));
 const pick = (preferred, fallback) => (available.has(preferred) ? preferred : fallback);
 
 // Roles used by the renderer. `display` = big comic title lettering; `comic` = in-panel captions and
-// dialogue; `pixel` = title lettering for retro-game/voxel-themed comics (see themeDisplayFont below).
+// dialogue; `pixel`/`horror` = title lettering for genre-specific themes (see themeDisplayFont below).
 // Fall back to a serif that exists everywhere (DejaVu on Linux, Georgia on Windows) so the service
 // still renders cleanly before the comic fonts are bundled.
 export const FONTS = {
   display: pick("Bangers", "Georgia"),
   comic: pick("Comic Neue", "Georgia"),
   pixel: pick("Press Start 2P", pick("Bangers", "Georgia")),
+  horror: pick("UnifrakturMaguntia", pick("Bangers", "Georgia")),
 };
 
-// Picks the title/header font based on the comic's own style/medium text, so a Minecraft/retro-game
-// book doesn't get the same swooshy Bangers lettering as a slice-of-life manga one. Body text (captions,
-// dialogue) intentionally always stays on FONTS.comic — Press Start 2P is unreadable at small sizes.
+// Picks the title/header font based on the comic's own style/tone/medium text, so genre-specific
+// comics don't all get the same swooshy Bangers lettering as a default slice-of-life manga one. Body
+// text (captions, dialogue) intentionally always stays on FONTS.comic — neither pixel nor blackletter
+// lettering is readable at small sizes. Order matters: pixel is checked first since a retro-horror
+// game comic should read as "retro game", not "horror".
 const PIXEL_THEME = /\b(pixel|8-?bit|16-?bit|voxel|minecraft|retro game|arcade|nes|game ?boy|blocky)\b/i;
+const HORROR_THEME = /\b(horror|curse|cursed|haunt(ed|ing)?|gothic|dread|ghost|ghostly|eerie|creepy|monster|nightmare|possess(ed|ion)?|occult)\b/i;
 export function themeDisplayFont(storyboard) {
-  const text = `${storyboard?.style || ""} ${storyboard?.art_direction?.medium || ""}`;
-  return PIXEL_THEME.test(text) ? FONTS.pixel : FONTS.display;
+  const text = `${storyboard?.style || ""} ${storyboard?.tone || ""} ${storyboard?.art_direction?.medium || ""}`;
+  if (PIXEL_THEME.test(text)) return FONTS.pixel;
+  if (HORROR_THEME.test(text)) return FONTS.horror;
+  return FONTS.display;
 }
