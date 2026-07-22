@@ -26,15 +26,22 @@ export function clampPages(n) {
 /**
  * Builds the deterministic art prompt for a panel. Character sheet + style are reused verbatim in
  * every panel (the cheap, reliable path to character consistency), and text is explicitly banned so
- * the renderer — not the image model — owns all captions and dialogue.
+ * the renderer — not the image model — owns all captions and dialogue. `characters` always has at
+ * least one entry; a closed cast list is spelled out so the model doesn't improvise extra bystanders.
  */
-function buildPanelImagePrompt({ style, character, beat, tone, artDirection, styleRules }) {
+function buildPanelImagePrompt({ style, characters, beat, tone, artDirection, styleRules }) {
+  const castLine = characters.length > 1
+    ? `Consistent recurring characters — ${characters.map((c) => `${c.name}: ${c.visual_description}`).join("; ")}. Keep each character's face, hair, and outfit identical in every panel; never blend or swap their features.`
+    : `Consistent recurring character: ${characters[0].visual_description}. Keep the same face, hair, and outfit in every panel. ${characters[0].continuity_notes || ""}`.trim();
   return [
     `Single ${style} comic panel, expressive comic art, clean composition, ${tone} mood.${artDirectionClause(artDirection)}`,
-    `Consistent recurring character: ${character.visual_description}. Keep the same face, hair, and outfit in every panel. ${character.continuity_notes || ""}`.trim(),
+    castLine,
     `Scene: ${beat}`,
     styleRules?.length ? styleRules.join(" ") : null,
     "Wide panel framing. Absolutely no text, no captions, no speech bubbles, no letters, no signs, no watermark.",
+    characters.length > 1
+      ? `Only these ${characters.length} named characters appear as people in this panel — no extra unnamed bystanders unless the scene explicitly calls for a background crowd.`
+      : null,
   ].filter(Boolean).join(" ");
 }
 
@@ -48,18 +55,26 @@ function normalizeStoryboard(request, llm) {
   const style = artDirection?.style || request.style || llm.style || "slice-of-life manga";
   const tone = artDirection?.tone || request.tone || llm.tone || "warm and honest";
 
-  const character = {
-    id: "char_main",
-    name: llm.characters?.[0]?.name || request.characters?.[0]?.name || "Main Character",
-    visual_description:
-      llm.characters?.[0]?.visual_description ||
-      request.characters?.[0]?.description ||
-      "expressive everyday person, relatable and cinematic",
-    continuity_notes:
-      llm.characters?.[0]?.continuity_notes ||
-      request.characters?.[0]?.continuity_notes ||
-      "Keep the same outfit, face shape, hairstyle, and expressiveness across every panel.",
-  };
+  // Build the FULL cast, not just character 0 — a request with 2 characters used to silently drop
+  // the second one, leaving it with no locked visual identity (the model then improvised a different-
+  // looking "extra" for it every panel, and the story LLM sometimes invented yet another name for it).
+  const requestChars = Array.isArray(request.characters) ? request.characters : [];
+  const llmChars = Array.isArray(llm.characters) ? llm.characters : [];
+  const castSize = Math.max(requestChars.length, llmChars.length, 1);
+  const characters = [];
+  for (let i = 0; i < castSize; i += 1) {
+    const rc = requestChars[i];
+    const lc = llmChars[i];
+    characters.push({
+      id: i === 0 ? "char_main" : `char_${i + 1}`,
+      name: lc?.name || rc?.name || (i === 0 ? "Main Character" : `Character ${i + 1}`),
+      visual_description:
+        lc?.visual_description || rc?.description || "expressive everyday person, relatable and cinematic",
+      continuity_notes:
+        lc?.continuity_notes || rc?.continuity_notes ||
+        "Keep the same outfit, face shape, hairstyle, and expressiveness across every panel.",
+    });
+  }
 
   const styleRules = [
     "Generate artwork without text inside the panels.",
@@ -84,11 +99,14 @@ function normalizeStoryboard(request, llm) {
         : typeof panel.dialogue === "string"
           ? [panel.dialogue]
           : [];
+      // Clamp speaker to a known cast member (case-insensitive) so the LLM can't attribute a line to
+      // an invented name it never established a visual identity for — falls back to the lead.
       const dialogue = rawDialogue
-        .map((d) => ({
-          speaker: String(d?.speaker || character.name).slice(0, 40),
-          text: String(typeof d === "string" ? d : (d?.text ?? "")).slice(0, 120),
-        }))
+        .map((d) => {
+          const rawSpeaker = String(d?.speaker || characters[0].name).slice(0, 40);
+          const speaker = characters.find((c) => c.name.toLowerCase() === rawSpeaker.toLowerCase())?.name || characters[0].name;
+          return { speaker, text: String(typeof d === "string" ? d : (d?.text ?? "")).slice(0, 120) };
+        })
         .filter((d) => d.text)
         .slice(0, 2);
       // A caller (buyer agent) may supply its own richer art prompt; otherwise we build one. When the
@@ -97,7 +115,7 @@ function normalizeStoryboard(request, llm) {
       // includes the clause inside buildPanelImagePrompt, so it must NOT be appended again there.
       const image_prompt = panel.image_prompt
         ? String(panel.image_prompt).slice(0, 1400) + artDirectionClause(artDirection)
-        : buildPanelImagePrompt({ style, character, beat, tone, artDirection, styleRules });
+        : buildPanelImagePrompt({ style, characters, beat, tone, artDirection, styleRules });
       const built = {
         panel: i + 1,
         beat,
@@ -132,7 +150,7 @@ function normalizeStoryboard(request, llm) {
     source_story: request.story,
     art_direction: artDirection,
     character_bible: {
-      characters: [character],
+      characters,
       style_rules: styleRules,
     },
     pages,
@@ -146,24 +164,35 @@ function storyboardPrompt(request) {
   const pageCount = clampPages(request.pages) ?? fmt.pages;
   const totalPanels = pageCount * fmt.panelsPerPage;
   const label = clampPages(request.pages) ? `${pageCount}-page` : fmt.label;
+  const chars = Array.isArray(request.characters) ? request.characters : [];
   return [
     `Turn this real-life moment into a ${label} comic storyboard.`,
     "",
     `STORY: ${request.story}`,
     `STYLE: ${request.style || "slice-of-life manga"}`,
     `MOOD: ${request.tone || "warm and honest"}`,
-    request.characters?.[0]?.name ? `MAIN CHARACTER: ${request.characters[0].name} — ${request.characters[0].description || ""}` : "",
+    chars.length
+      ? [
+          `CAST (exactly ${chars.length} character${chars.length > 1 ? "s" : ""} — use ONLY these names for dialogue speakers`,
+          "and the story; do not invent any additional named characters):",
+          ...chars.map((c, i) => `${i + 1}. ${c.name || `Character ${i + 1}`} — ${c.description || ""}`),
+        ].join("\n")
+      : "",
     "",
     `Produce exactly ${pageCount} page(s), each with exactly ${fmt.panelsPerPage} panels (${totalPanels} panels total).`,
     "Give the comic an evocative TITLE. For each panel provide a visual 'beat' (what we see), a short",
-    "narration 'caption' (<= 12 words), and one line of 'dialogue' (<= 12 words). Keep the emotional arc",
-    "coherent and end on a satisfying beat. Also give one shareable 'social_caption'.",
+    "narration 'caption' (<= 12 words), and one line of 'dialogue' (<= 12 words) attributed to one of the",
+    "cast above via a 'speaker' field. Keep the emotional arc coherent and end on a satisfying beat.",
+    "Also give one shareable 'social_caption'.",
     "",
     "Return STRICT JSON only, this exact shape:",
-    `{"title":"...","characters":[{"name":"...","visual_description":"..."}],`,
-    `"pages":[{"page_title":"...","panels":[{"beat":"...","caption":"...","dialogue":"..."}]}],`,
+    `{"title":"...","characters":[{"name":"...","visual_description":"..."}${chars.length > 1 ? ",{...}" : ""}],`,
+    `"pages":[{"page_title":"...","panels":[{"beat":"...","caption":"...","dialogue":[{"speaker":"...","text":"..."}]}]}],`,
     `"social_caption":"..."}`,
-  ].join("\n");
+    chars.length > 1
+      ? `The "characters" array must have exactly ${chars.length} entries, one per cast member above, in the same order, each with a distinct "visual_description" a comic artist could draw consistently.`
+      : "",
+  ].filter(Boolean).join("\n");
 }
 
 /**

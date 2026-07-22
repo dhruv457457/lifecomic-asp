@@ -23,9 +23,20 @@ const available = new Set((GlobalFonts.families || []).map((f) => f.family));
 const pick = (preferred, fallback) => (available.has(preferred) ? preferred : fallback);
 
 // Roles used by the renderer. `display` = big comic title lettering; `comic` = in-panel captions and
-// dialogue. Fall back to a serif that exists everywhere (DejaVu on Linux, Georgia on Windows) so the
-// service still renders cleanly before the comic fonts are bundled.
+// dialogue; `pixel` = title lettering for retro-game/voxel-themed comics (see themeDisplayFont below).
+// Fall back to a serif that exists everywhere (DejaVu on Linux, Georgia on Windows) so the service
+// still renders cleanly before the comic fonts are bundled.
 export const FONTS = {
   display: pick("Bangers", "Georgia"),
   comic: pick("Comic Neue", "Georgia"),
+  pixel: pick("Press Start 2P", pick("Bangers", "Georgia")),
 };
+
+// Picks the title/header font based on the comic's own style/medium text, so a Minecraft/retro-game
+// book doesn't get the same swooshy Bangers lettering as a slice-of-life manga one. Body text (captions,
+// dialogue) intentionally always stays on FONTS.comic — Press Start 2P is unreadable at small sizes.
+const PIXEL_THEME = /\b(pixel|8-?bit|16-?bit|voxel|minecraft|retro game|arcade|nes|game ?boy|blocky)\b/i;
+export function themeDisplayFont(storyboard) {
+  const text = `${storyboard?.style || ""} ${storyboard?.art_direction?.medium || ""}`;
+  return PIXEL_THEME.test(text) ? FONTS.pixel : FONTS.display;
+}

@@ -4,11 +4,14 @@ import { generateImage, isConfigured, toDataUrl } from "./openrouter.js";
 import { artDirectionClause } from "./art-direction.js";
 
 /** Prompt for a one-off character sheet reused as a reference for every panel (consistency anchor). */
-function characterRefPrompt(character, style, artDirection) {
+function characterRefPrompt(characters, style, artDirection) {
+  const castDesc = characters.map((c) => `${c.name}: ${c.visual_description}`).join("; ");
   return [
     `Character reference sheet in ${style} comic style.${artDirectionClause(artDirection)}`,
-    "Three views of ONE single character on a plain neutral background: front-facing full body, a 3/4 turn, and a face close-up with a clear expression.",
-    `Character: ${character.visual_description}. ${character.continuity_notes || ""}`.trim(),
+    characters.length > 1
+      ? `Show all ${characters.length} distinct named characters together on one plain neutral background sheet, each clearly separate: a front-facing full body plus a face close-up for each.`
+      : "Three views of ONE single character on a plain neutral background: front-facing full body, a 3/4 turn, and a face close-up with a clear expression.",
+    `Character${characters.length > 1 ? "s" : ""}: ${castDesc}.`,
     "Clear, consistent design meant to be reused across many comic panels.",
     "No text, no captions, no speech bubbles, no letters, no watermark.",
   ].join(" ");
@@ -30,10 +33,10 @@ const MAX_EXTERNAL_IMAGE_BYTES = 8 * 1024 * 1024;
 const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 async function generateCharacterReference(storyboard, panelsDir) {
-  const character = storyboard.character_bible?.characters?.[0];
-  if (!character?.visual_description) return null;
+  const characters = (storyboard.character_bible?.characters || []).filter((c) => c?.visual_description);
+  if (!characters.length) return null;
   try {
-    const img = await generateImage(characterRefPrompt(character, storyboard.style, storyboard.art_direction), { aspectRatio: "3:4", timeoutMs: IMAGE_TIMEOUT_MS });
+    const img = await generateImage(characterRefPrompt(characters, storyboard.style, storyboard.art_direction), { aspectRatio: "3:4", timeoutMs: IMAGE_TIMEOUT_MS });
     await fs.writeFile(path.join(panelsDir, "_character_ref.png"), img.buffer);
     return { dataUrl: toDataUrl(img), cost: img.cost ?? 0 };
   } catch {
@@ -135,8 +138,11 @@ export async function generatePanels(storyboard, outputDir, { concurrency = 4, r
       storyboard.character_bible.reference_source = "generated";
     }
   }
+  const castSize = storyboard.character_bible?.characters?.length || 1;
   const refSuffix = references.length
-    ? " Keep the same character as the reference — identical face, hair, and outfit — but pose and frame them naturally for THIS scene; do not copy the reference's pose, layout, or plain background."
+    ? (castSize > 1
+        ? " Match each named character to their appearance in the reference sheet exactly — identical faces, hair, and outfits, correctly matched to each name — but pose and frame them naturally for THIS scene; do not copy the reference's pose, layout, or plain background."
+        : " Keep the same character as the reference — identical face, hair, and outfit — but pose and frame them naturally for THIS scene; do not copy the reference's pose, layout, or plain background.")
     : "";
 
   await mapLimit(flat, concurrency, async ({ page, panel }) => {

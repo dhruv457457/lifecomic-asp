@@ -4,7 +4,7 @@ import PDFDocument from "pdfkit";
 import sharp from "sharp";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { PAGE, panelArea, assignLayout } from "./lib/layout.js";
-import { FONTS } from "./lib/fonts.js";
+import { FONTS, themeDisplayFont } from "./lib/fonts.js";
 
 export async function renderComic(storyboard, outputDir) {
   // Ensure every panel has a layout rect (storyboards rendered without the pipeline, or older ones).
@@ -52,7 +52,7 @@ async function renderPage(storyboard, page, outPath) {
   const ctx = canvas.getContext("2d");
 
   drawBackground(ctx);
-  drawHeader(ctx, storyboard.title, page.page_title);
+  drawHeader(ctx, storyboard.title, page.page_title, themeDisplayFont(storyboard));
 
   // Fall back to a plain grid only if a panel is missing its assigned layout rect.
   const area = panelArea();
@@ -92,13 +92,13 @@ function drawBackground(ctx) {
   ctx.fillRect(48, 48, PAGE.width - 96, PAGE.height - 96);
 }
 
-function drawHeader(ctx, title, pageTitle) {
+function drawHeader(ctx, title, pageTitle, displayFont = FONTS.display) {
   ctx.fillStyle = "#1b1714";
   // Auto-shrink the title so long ones (e.g. "JAIPUR WEB-SLINGER VS. MBAPU THE UNDEAD") fit the width.
   const maxTitleWidth = PAGE.width - PAGE.margin * 2;
   let titleSize = 72;
   do {
-    ctx.font = `bold ${titleSize}px ${FONTS.display}`;
+    ctx.font = `bold ${titleSize}px ${displayFont}`;
     if (ctx.measureText(title).width <= maxTitleWidth) break;
     titleSize -= 2;
   } while (titleSize > 34);
@@ -191,31 +191,49 @@ function drawCaption(ctx, text, x, y, width) {
   lines.forEach((line, i) => ctx.fillText(line, x + 18, y + 36 + i * lineHeight));
 }
 
-/** Wraps text into at most maxLines lines; the last line gets an ellipsis if text overflows. */
+/**
+ * Wraps text into at most maxLines lines; the last line gets an ellipsis if text overflows.
+ * Fills every line up to maxLines-1 normally, then folds ALL remaining words onto the final line
+ * and ellipsizes only that one if it doesn't fit — so overflow text is always visibly truncated with
+ * "…", never silently dropped (the previous version could break early and discard a whole sentence
+ * with no ellipsis, e.g. a long cover tagline collapsing to a bare "—").
+ */
 function computeWrappedLines(ctx, text, maxWidth, maxLines) {
   const words = String(text).split(/\s+/).filter(Boolean);
   const lines = [];
   let line = "";
-  for (const word of words) {
+  let i = 0;
+  while (i < words.length && lines.length < maxLines - 1) {
+    const word = words[i];
     const test = line ? `${line} ${word}` : word;
     if (ctx.measureText(test).width > maxWidth && line) {
       lines.push(line);
-      line = word;
-      if (lines.length === maxLines - 1) break;
+      line = "";
     } else {
       line = test;
+      i += 1;
     }
   }
-  if (lines.length < maxLines) {
+  const rest = words.slice(i);
+  if (!rest.length) {
     if (line) lines.push(line);
-  } else {
-    // Hit the line cap: ellipsize whatever remains so it never cuts mid-word.
-    let last = line;
-    while (ctx.measureText(`${last}…`).width > maxWidth && last.includes(" ")) {
-      last = last.slice(0, last.lastIndexOf(" "));
-    }
-    lines.push(`${last}…`);
+    return lines;
   }
+  const finalLine = line ? `${line} ${rest.join(" ")}` : rest.join(" ");
+  if (ctx.measureText(finalLine).width <= maxWidth) {
+    lines.push(finalLine);
+    return lines;
+  }
+  let candidate = line;
+  for (const word of rest) {
+    const test = candidate ? `${candidate} ${word}` : word;
+    if (ctx.measureText(`${test}…`).width > maxWidth) break;
+    candidate = test;
+  }
+  while (candidate.includes(" ") && ctx.measureText(`${candidate}…`).width > maxWidth) {
+    candidate = candidate.slice(0, candidate.lastIndexOf(" "));
+  }
+  lines.push(candidate ? `${candidate}…` : "…");
   return lines;
 }
 
@@ -401,33 +419,52 @@ async function renderCover(storyboard, outPath) {
   }
 
   const cx = PAGE.width / 2;
+  const textMaxWidth = bw - 160;
   ctx.textAlign = "center";
 
   ctx.font = "bold 30px Arial";
   ctx.fillStyle = light ? "rgba(255,250,240,0.9)" : "#1b1714";
   ctx.fillText("A LIFECOMIC ORIGINAL", cx, by + 96);
 
-  // Title: pick the largest size that fits, then wrap up to 3 centered lines.
+  // Title: pick the largest size that fits, then wrap up to 3 centered lines. Font adapts to the
+  // comic's own theme (e.g. a Minecraft/retro-game book gets a pixel font, not the default swoosh).
+  const displayFont = themeDisplayFont(storyboard);
   let size = 132;
   do {
-    ctx.font = `bold ${size}px ${FONTS.display}`;
-    if (ctx.measureText(storyboard.title).width <= (bw - 160) * 2.4) break;
+    ctx.font = `bold ${size}px ${displayFont}`;
+    if (ctx.measureText(storyboard.title).width <= textMaxWidth * 2.4) break;
     size -= 4;
   } while (size > 52);
-  const titleLines = computeWrappedLines(ctx, String(storyboard.title).toUpperCase(), bw - 160, 3);
+  const titleLines = computeWrappedLines(ctx, String(storyboard.title).toUpperCase(), textMaxWidth, 3);
   const titleTop = PAGE.height * 0.4;
   ctx.fillStyle = light ? "#fffaf0" : "#1b1714";
   titleLines.forEach((line, i) => ctx.fillText(line, cx, titleTop + i * (size + 10)));
 
-  ctx.font = "italic 40px Georgia";
+  // Style/tone tagline: shrink-to-fit + wrap to 2 lines instead of one unbounded fillText — a long
+  // artDirection tone string (e.g. "serious, sad, and angry — no comedy...") used to run off both
+  // edges of the frame unwrapped and read as garbled, overlapping text.
+  let taglineSize = 40;
+  const taglineText = `${storyboard.style} · ${storyboard.tone}`;
+  do {
+    ctx.font = `italic ${taglineSize}px Georgia`;
+    if (ctx.measureText(taglineText).width <= textMaxWidth * 2.1) break;
+    taglineSize -= 2;
+  } while (taglineSize > 20);
+  const taglineLines = computeWrappedLines(ctx, taglineText, textMaxWidth, 2);
   ctx.fillStyle = light ? "rgba(255,250,240,0.92)" : "#5a4f47";
-  ctx.fillText(`${storyboard.style} · ${storyboard.tone}`, cx, titleTop + titleLines.length * (size + 10) + 26);
+  const taglineTop = titleTop + titleLines.length * (size + 10) + 26;
+  taglineLines.forEach((line, i) => ctx.fillText(line, cx, taglineTop + i * (taglineSize + 10)));
 
-  const name = storyboard.character_bible?.characters?.[0]?.name;
-  if (name) {
+  // Credit every named character, not just the first — "featuring Finn" used to silently drop the
+  // rest of the cast even when the story clearly had more than one character.
+  const names = (storyboard.character_bible?.characters || []).map((c) => c.name).filter(Boolean);
+  if (names.length) {
+    const creditText = names.length > 1
+      ? `featuring ${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`
+      : `featuring ${names[0]}`;
     ctx.font = "36px Georgia";
     ctx.fillStyle = light ? "rgba(255,250,240,0.95)" : "#1b1714";
-    ctx.fillText(`featuring ${name}`, cx, PAGE.height - 230);
+    ctx.fillText(creditText, cx, PAGE.height - 230);
   }
   ctx.font = "26px Arial";
   ctx.fillStyle = light ? "rgba(255,250,240,0.82)" : "#7a6f66";
@@ -447,7 +484,7 @@ async function renderCredits(storyboard, outPath) {
   ctx.textAlign = "center";
 
   ctx.fillStyle = "#1b1714";
-  ctx.font = `bold 72px ${FONTS.display}`;
+  ctx.font = `bold 72px ${themeDisplayFont(storyboard)}`;
   ctx.fillText("THE END", cx, PAGE.height * 0.28);
 
   // Shareable caption, wrapped and centered.
@@ -456,11 +493,12 @@ async function renderCredits(storyboard, outPath) {
   const capLines = computeWrappedLines(ctx, storyboard.social_caption || "", PAGE.width - 400, 3);
   capLines.forEach((line, i) => ctx.fillText(line, cx, PAGE.height * 0.38 + i * 50));
 
-  // Credits block.
-  const name = storyboard.character_bible?.characters?.[0]?.name || "—";
+  // Credits block — lists the whole cast, not just character 0.
+  const names = (storyboard.character_bible?.characters || []).map((c) => c.name).filter(Boolean);
+  const featuring = names.length > 1 ? `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}` : (names[0] || "—");
   const rows = [
     ["Title", storyboard.title],
-    ["Featuring", name],
+    ["Featuring", featuring],
     ["Style", storyboard.style],
     ["Mood", storyboard.tone],
     ["Pages", String(storyboard.pages.length)],
