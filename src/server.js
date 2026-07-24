@@ -46,8 +46,20 @@ const SERVICE = {
   type: "A2MCP",
   category: "Art",
   description:
-    "Turn a real-life moment into a comic. Send a short story; get back a titled, lettered comic page or multi-page PDF with consistent characters. For humans and for agents (diary, travel, wellness, coach).",
-  capabilities: ["story_to_comic_page", "story_to_comic_book", "storyboard_only", "consistent_characters", "pdf_export"],
+    "Turn any story — a real-life moment or pure fiction — into a finished comic: a single page or a whole multi-chapter saga. Consistent characters across every panel AND chapter, any art style (title lettering adapts to the genre), per-page revision, bring-your-own-art, and both PDF + CBZ delivery with a commercial license. A free public gallery lists opt-in comics. For humans and for agents (diary, travel, wellness, coach, storytellers). From $0.15/page.",
+  capabilities: [
+    "story_to_comic_page",
+    "story_to_comic_book",
+    "multi_chapter_series_memory",
+    "per_page_revision",
+    "storyboard_only",
+    "consistent_characters",
+    "any_art_style_genre_aware",
+    "bring_your_own_art",
+    "pdf_and_cbz_export",
+    "public_gallery",
+    "commercial_license",
+  ],
 };
 
 const ENDPOINTS = {
