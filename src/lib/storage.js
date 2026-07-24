@@ -27,6 +27,17 @@ async function uploadOne(filePath, folder, { raw = false, publicId } = {}) {
   return res.secure_url;
 }
 
+/** Best-effort variant: returns the URL, or null if the upload fails. Used for the CBZ — a large or
+ * over-limit CBZ must never break the core PDF/pages delivery a buyer paid for. */
+async function uploadOptional(filePath, folder, opts) {
+  try {
+    return await uploadOne(filePath, folder, opts);
+  } catch (error) {
+    console.warn("[storage] optional upload failed, skipping:", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 /**
  * Uploads a comic's deliverables to Cloudinary and returns the same URL shape as the local
  * `fileUrls()` (pdf, pages[], storyboard, imagePrompts, socialCaption). Returns null when storage is
@@ -38,9 +49,10 @@ export async function uploadComic(id, files) {
   if (!storageEnabled()) return null;
   const folder = `lifecomic/${id}`;
 
-  const [pages, pdf, storyboard, imagePrompts, socialCaption] = await Promise.all([
+  const [pages, pdf, cbz, storyboard, imagePrompts, socialCaption] = await Promise.all([
     Promise.all((files.pages || []).map((p) => uploadOne(p, `${folder}/pages`))),
     files.pdf ? uploadOne(files.pdf, folder, { raw: true, publicId: "comic" }) : null,
+    files.cbz ? uploadOptional(files.cbz, folder, { raw: true, publicId: "comic_cbz" }) : null,
     files.storyboard ? uploadOne(files.storyboard, folder, { raw: true, publicId: "storyboard" }) : null,
     files.imagePrompts ? uploadOne(files.imagePrompts, folder, { raw: true, publicId: "image_prompts" }) : null,
     files.socialCaption ? uploadOne(files.socialCaption, folder, { raw: true, publicId: "social_caption" }) : null,
@@ -48,6 +60,7 @@ export async function uploadComic(id, files) {
 
   const out = { pages };
   if (pdf) out.pdf = pdf;
+  if (cbz) out.cbz = cbz;
   if (storyboard) out.storyboard = storyboard;
   if (imagePrompts) out.imagePrompts = imagePrompts;
   if (socialCaption) out.socialCaption = socialCaption;

@@ -11,6 +11,9 @@ import { handleMcpRequest, handlePaidMcpRequest, validateToolCall } from "./lib/
 import { uploadComic, storageEnabled } from "./lib/storage.js";
 import { createRateLimiter, createSpendBudget, redisEnabled } from "./lib/limiter.js";
 import { loadSeries, saveSeries, applySeriesDefaults } from "./lib/series.js";
+import { recordComic, getComic, listPublicComics } from "./lib/comic-registry.js";
+import { buildReceipt, commercialLicense } from "./lib/receipt.js";
+import { reviseComicPage } from "./lib/revise.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -55,6 +58,8 @@ const ENDPOINTS = {
   storyboard: { path: "/mcp/storyboard", method: "POST", auth: "x402", purpose: "Text-only comic script: title, per-panel beats/captions/dialogue, art prompts, social caption.", input: "{ story, style?, tone?, format?, characters? }" },
   comic: { path: "/mcp/comic", method: "POST", auth: "x402", purpose: "A finished single comic page (4 panels) with real art + PDF + PNG, delivered in the paid response (typically 15-30s). Send a raw 'story' (we write it) OR a full 'storyboard' you composed with your own LLM (higher quality, full control).", input: "{ story, style?, tone?, characters?, artDirection?, seriesId? }  OR  { storyboard: {title, style, characters:[...], pages:[{page_title, panels:[{beat, caption, dialogue, image_prompt?, image_url?, image_data?}]}]} }. artDirection = { style?, tone?, medium?, palette?, lineWeight?, lighting?, referenceImages?: string[] } enforces one visual identity across all panels. Per-panel image_url (hosted, preferred) / image_data (base64) supplies your own art and skips generation. seriesId ties this page to a multi-chapter story — see /mcp/book." },
   book: { path: "/mcp/book", method: "POST", auth: "x402", purpose: "A multi-page comic book. Choose any length via 'pages' (2-12, default 4); price is per page. Delivered in the paid response (typically 30-90s); if a render runs unusually long you get a jobId to poll at /jobs/:jobId instead. Accepts 'story' or a full 'storyboard' (same as /mcp/comic).", input: "{ story | storyboard, pages?: 2-12, style?, tone?, characters?, artDirection?, seriesId? }. Supply per-panel image_url on every panel for a fully bring-your-own-art book (story + lettering + layout + PDF only; use image_url, not base64, for books). seriesId (any string you choose) continues a multi-chapter story: pass the SAME seriesId on later calls and the cast/style/tone/artDirection (and the actual reference art, once generated) carry over automatically — only send the new chapter's story/beats. The response echoes seriesId + chapterNumber so you can track it. Before calling, ask your user how many pages this chapter should be and whether they want just this chapter now or the whole story — each chapter is a separate paid call." },
+  revise: { path: "/mcp/revise", method: "POST", auth: "x402", purpose: "Regenerate ONE page of an existing comic without repaying for the whole book. Fixed price (cheaper than a fresh page). Reuses the unchanged pages and re-renders only the target page with your revision note, keeping the original cast + style. Rebuilds the PDF + CBZ.", input: "{ comicId, page, instructions }. `page` is the 1-based STORY page to fix (a book's cover/credits aren't separately revised). `instructions` is a short note like 'make it night time' or 'the character should look scared'. If the comic's registry record has expired you may instead pass { storyboard, pages: [hosted page URLs], page, instructions }." },
+  gallery: { path: "/gallery", method: "GET", auth: "none", purpose: "Free public gallery of comics whose creators opted in (public:true at creation), newest first. Comics are opt-in only since they're often personal stories.", input: "?limit=30 (max 100)" },
   jobStatus: { path: "/jobs/:jobId", method: "GET", auth: "none", purpose: "Poll an async book job for status + finished file URLs." },
 };
 
@@ -124,6 +129,7 @@ function validStory(req, res) {
 function fileUrls(id, files, baseUrl = BASE_URL) {
   return {
     pdf: `${baseUrl}/files/${id}/${path.basename(files.pdf)}`,
+    cbz: files.cbz ? `${baseUrl}/files/${id}/${path.basename(files.cbz)}` : undefined,
     pages: (files.pages || []).map((p) => `${baseUrl}/files/${id}/pages/${path.basename(p)}`),
     storyboard: `${baseUrl}/files/${id}/storyboard.json`,
     imagePrompts: `${baseUrl}/files/${id}/image_prompts.txt`,
@@ -143,6 +149,9 @@ async function runComic(request, { withArt = true, baseUrl = BASE_URL } = {}) {
   const id = `comic_${randomUUID().slice(0, 8)}`;
   const outputDir = path.join(OUTPUT_ROOT, id);
   const result = await createComic(resolvedRequest, { outputDir, withArt, seriesId });
+  // Receipt is hashed from the LOCAL pdf before upload/cleanup (paid deliveries only — a free preview
+  // has no art and doesn't need a delivery hash).
+  const receipt = withArt ? await buildReceipt(result.files.pdf, { id, title: result.title }) : null;
   // Upload to durable storage (Cloudinary) when configured so files survive redeploys; on any
   // failure or when disabled, fall back to serving from local disk.
   let hosted = null;
@@ -152,7 +161,7 @@ async function runComic(request, { withArt = true, baseUrl = BASE_URL } = {}) {
     console.warn("[storage] upload failed, serving locally:", error instanceof Error ? error.message : error);
   }
   const chapterNumber = seriesId ? await saveSeries(seriesId, result.storyboard) : null;
-  return {
+  const out = {
     id,
     title: result.title,
     status: result.status,
@@ -161,9 +170,18 @@ async function runComic(request, { withArt = true, baseUrl = BASE_URL } = {}) {
     costUsd: result.cost,
     storage: hosted ? "cloudinary" : "local",
     social_caption: result.storyboard.social_caption,
+    style: result.storyboard.style,
     files: hosted ?? fileUrls(id, result.files, baseUrl),
     ...(seriesId ? { seriesId, chapterNumber } : {}),
+    ...(receipt ? { receipt } : {}),
+    ...(withArt ? { license: commercialLicense() } : {}),
   };
+  // Opt-in public gallery: only records when the caller explicitly set public:true, since comics are
+  // often personal stories. Best-effort; never blocks delivery. Only real (with-art) comics are listed.
+  if (withArt) {
+    await recordComic(out, { isPublic: request.public === true || request.publish === true });
+  }
+  return out;
 }
 
 function asyncRoute(handler) {
@@ -190,6 +208,14 @@ app.get("/service", (_req, res) =>
     endpoints: ENDPOINTS,
   }),
 );
+
+// Free public gallery — comics whose creator opted in (public:true at creation), newest first. Free
+// by design: gating discovery behind payment would kill the network-effect value. Rate-limited by the
+// global limiter. Empty until callers start publishing (and Redis is configured).
+app.get("/gallery", asyncRoute(async (req, res) => {
+  const comics = await listPublicComics({ limit: req.query.limit });
+  res.json({ count: comics.length, comics });
+}));
 
 app.get("/x402/status", (_req, res) => {
   const c = getX402Config();
@@ -293,6 +319,53 @@ app.post("/mcp/book", asyncRoute(async (req, res) => {
   // exceed what the caller paid for (pages × per-page rate).
   const pages = clampBookPages(req.body?.pages);
   await deliverRender(req, res, { ...req.body, format: "mini_book_4_pages", pages }, { pages });
+}));
+
+// Regenerates ONE page of an existing comic (identified by comicId, or by supplying storyboard+pages)
+// without repaying for the whole book. Fixed price — it reuses the unchanged pages and only regenerates
+// the target page's art.
+async function runRevise(body, { baseUrl = BASE_URL } = {}) {
+  const id = typeof body?.comicId === "string" ? body.comicId : null;
+  const outputDir = path.join(OUTPUT_ROOT, id || `revise_${randomUUID().slice(0, 8)}`);
+  const result = await reviseComicPage(
+    { comicId: id, page: body?.page, instructions: body?.instructions, storyboard: body?.storyboard, pages: body?.pages },
+    { outputDir },
+  );
+  const receipt = await buildReceipt(result.files.pdf, { id: result.id, title: result.title });
+  let hosted = null;
+  try {
+    hosted = await uploadComic(result.id, result.files);
+  } catch (error) {
+    console.warn("[storage] revise upload failed, serving locally:", error instanceof Error ? error.message : error);
+  }
+  const out = {
+    id: result.id,
+    revisedPage: result.page,
+    title: result.title,
+    art: result.art,
+    costUsd: result.cost,
+    storage: hosted ? "cloudinary" : "local",
+    files: hosted ?? fileUrls(result.id, result.files, baseUrl),
+    ...(receipt ? { receipt } : {}),
+    license: commercialLicense(),
+  };
+  // Refresh the registry record so a subsequent revision (or the gallery) sees the new page set.
+  const prior = await getComic(result.id);
+  await recordComic({ ...out, style: prior?.style, seriesId: prior?.seriesId }, { isPublic: prior?.public === true });
+  return out;
+}
+
+app.post("/mcp/revise", asyncRoute(async (req, res) => {
+  if (!gateOr503(res)) return;
+  if (req.body?.page === undefined) {
+    return res.status(400).json({ error: "provide { comicId, page, instructions } — 'page' is the 1-based story page to regenerate" });
+  }
+  try {
+    const out = await runRevise(req.body, { baseUrl: resolveBaseUrl(req) });
+    res.json({ paid: true, ...out });
+  } catch (error) {
+    res.status(400).json({ paid: true, error: error instanceof Error ? error.message : String(error) });
+  }
 }));
 
 // MCP JSON-RPC endpoint — the A2MCP interface. EVERY unpaid request returns a 402 challenge: GET,

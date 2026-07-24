@@ -2,6 +2,7 @@ import fs from "fs-extra";
 import path from "node:path";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
+import JSZip from "jszip";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { PAGE, panelArea, assignLayout } from "./lib/layout.js";
 import { FONTS, themeDisplayFont } from "./lib/fonts.js";
@@ -39,12 +40,51 @@ export async function renderComic(storyboard, outputDir) {
   const pdfPath = path.join(outputDir, "comic.pdf");
   await renderPdf(storyboard, pageFiles, pdfPath);
 
+  const cbzPath = path.join(outputDir, "comic.cbz");
+  await renderCbz(pageFiles, cbzPath);
+
   return {
     pdf: pdfPath,
+    cbz: cbzPath,
     pages: pageFiles, // reading order: [cover?, ...pages, credits?]
     cover: coverPath,
     storyboard: path.join(outputDir, "storyboard.json"),
   };
+}
+
+/**
+ * Bundles the pages into a .cbz (a plain ZIP that comic readers like Kavita, Tachiyomi, and CDisplayEx
+ * read natively). Pages are downscaled + JPEG-compressed first — the same reason the PDF is: full-res
+ * PNGs push a multi-page book well past object-storage per-file limits (Cloudinary free tier = 10MB),
+ * which would fail the whole upload. JPEG q85 at reading width is indistinguishable in a reader and
+ * keeps even a 12-page book a few MB. Files are STORED (no zip compression) since JPEG is already
+ * compressed. Named with a zero-padded numeric prefix so the reader keeps reading order.
+ */
+async function renderCbz(pageFiles, cbzPath) {
+  const zip = new JSZip();
+  for (let index = 0; index < pageFiles.length; index += 1) {
+    const jpg = await sharp(pageFiles[index]).resize(PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT).jpeg({ quality: 85 }).toBuffer();
+    zip.file(`${String(index + 1).padStart(3, "0")}.jpg`, jpg);
+  }
+  const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
+  await fs.writeFile(cbzPath, buffer);
+}
+
+/** Renders a single page to a PNG — used by the per-page revision flow (see lib/revise.js). */
+export async function renderOnePage(storyboard, page, outPath) {
+  return renderPage(storyboard, page, outPath);
+}
+
+/**
+ * Rebuilds the PDF + CBZ from an ordered list of page PNG paths (some reused/downloaded, one freshly
+ * re-rendered). Used by revision to reassemble the deliverables without regenerating every page.
+ */
+export async function buildDeliverables(storyboard, pageFiles, outputDir) {
+  const pdfPath = path.join(outputDir, "comic.pdf");
+  await renderPdf(storyboard, pageFiles, pdfPath);
+  const cbzPath = path.join(outputDir, "comic.cbz");
+  await renderCbz(pageFiles, cbzPath);
+  return { pdf: pdfPath, cbz: cbzPath };
 }
 
 async function renderPage(storyboard, page, outPath) {

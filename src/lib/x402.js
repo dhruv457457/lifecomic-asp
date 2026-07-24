@@ -27,6 +27,7 @@ export function getX402Config() {
     "POST /mcp/storyboard": process.env.X402_STORYBOARD_PRICE || "$0.02",
     "POST /mcp/comic": process.env.X402_COMIC_PRICE || "$0.15",
     "POST /mcp/book": `$${perPageRate().toFixed(2)}/page (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES} pages, default ${BOOK_DEFAULT_PAGES})`,
+    "POST /mcp/revise": process.env.X402_REVISE_PRICE || "$0.10",
   };
 
   return {
@@ -60,6 +61,7 @@ export async function createX402Middleware() {
     "POST /mcp/storyboard": "LifeComic storyboard (text-only script + prompts)",
     "POST /mcp/comic": "LifeComic single comic page (art + PDF)",
     "POST /mcp/book": "LifeComic multi-page comic book (art + PDF)",
+    "POST /mcp/revise": "LifeComic per-page revision (regenerate one page of an existing comic)",
   };
 
   // The book route is priced per page: x402 supports a DynamicPrice function that reads the request

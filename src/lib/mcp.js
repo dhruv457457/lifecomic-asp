@@ -43,6 +43,11 @@ const seriesIdSchema = {
   description: "Optional: any string YOU choose to link chapters of the same multi-chapter story. Pass the SAME seriesId on the next chapter's call and the cast, style/tone, and art direction (including the actual reference art once generated) carry over automatically — you only need to send that chapter's new story/beats. The response echoes back `seriesId` and `chapterNumber`. Ask the user how many pages THIS chapter should be, and whether they want the whole story now or just chapter 1 to start — each chapter is its own paid call.",
 };
 
+const publicSchema = {
+  type: "boolean",
+  description: "Optional, default false. Set true ONLY with the user's clear consent to list this finished comic in LifeComic's public gallery (GET /gallery) for others to discover. Comics are often personal stories, so this is strictly opt-in — never set it without asking the user, since it makes the comic publicly visible.",
+};
+
 // Tool definitions advertised by tools/list. `execution.taskSupport: "forbidden"` marks these as
 // synchronous MCP calls (not A2A tasks), matching how listed A2MCP generators declare themselves.
 export const MCP_TOOLS = [
@@ -61,6 +66,7 @@ export const MCP_TOOLS = [
         artDirection: artDirectionSchema,
         storyboard: storyboardSchema,
         seriesId: seriesIdSchema,
+        public: publicSchema,
       },
       required: ["story"],
     },
@@ -82,6 +88,7 @@ export const MCP_TOOLS = [
         artDirection: artDirectionSchema,
         storyboard: storyboardSchema,
         seriesId: seriesIdSchema,
+        public: publicSchema,
       },
       required: ["story"],
     },
@@ -135,7 +142,7 @@ export function validateToolCall(body) {
 
 /** Maps a tool call to the createComic request shape, tolerant of imperfect agent argument mapping. */
 function toRenderRequest(name, args = {}) {
-  const base = { style: args.style, tone: args.tone, characters: args.characters, artDirection: args.artDirection, seriesId: args.seriesId };
+  const base = { style: args.style, tone: args.tone, characters: args.characters, artDirection: args.artDirection, seriesId: args.seriesId, public: args.public === true };
   if (args.storyboard && typeof args.storyboard === "object") base.storyboard = args.storyboard;
   else base.story = extractStory(args) || FALLBACK_STORY;
   if (name === "make_book") return { ...base, format: "mini_book_4_pages", pages: clampBookPages(args.pages) };
