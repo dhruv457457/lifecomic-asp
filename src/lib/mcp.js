@@ -13,8 +13,8 @@ const characterSchema = {
   items: {
     type: "object",
     properties: {
-      name: { type: "string" },
-      description: { type: "string", description: "Visual description (hair, clothes, vibe)." },
+      name: { type: "string", description: "The character's name, used in captions/dialogue and to keep them consistent — e.g. \"Mia\"." },
+      description: { type: "string", description: "Visual description the artist locks onto (hair, clothes, build, vibe) — e.g. \"18-year-old hunter, short hair, worn notebook\"." },
     },
   },
 };
@@ -69,6 +69,11 @@ export const MCP_TOOLS = [
         public: publicSchema,
       },
       required: ["story"],
+      examples: [
+        { story: "I missed my train, spilled coffee on my shirt, and still landed the job." },
+        { story: "My cat knocked my plant off the shelf and stared at me with zero regret.", style: "manga", tone: "funny" },
+        { story: "First day at a new gym — nervous, then a stranger showed me the ropes.", style: "watercolor", characters: [{ name: "Sam", description: "nervous newcomer in an oversized hoodie" }] },
+      ],
     },
     execution: { taskSupport: "forbidden" },
   },
@@ -76,7 +81,7 @@ export const MCP_TOOLS = [
     name: "make_book",
     title: "Make a comic book",
     description:
-      `Turn a story into a multi-page comic book (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES} pages, default ${BOOK_DEFAULT_PAGES}) with a cover, one consistent cast from cover to cliffhanger, and a print-ready PDF. Call with a plain-text 'story' argument and an optional 'pages' number. Returns the book's PDF and page-image URLs. Priced per page in USDT. Generation is synchronous and typically takes ~30-90 seconds depending on page count. BEFORE calling: if the user hasn't said how long they want it, ask how many pages (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES}). If the story sounds like it's part of a bigger, multi-chapter arc, ask whether they want the whole thing planned out now or just chapter 1 to start — for a multi-chapter story, use 'seriesId' (see its own field) so later chapters automatically keep the same cast and art style.`,
+      `Turn a story into a multi-page comic book (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES} pages, default ${BOOK_DEFAULT_PAGES}) with a cover, one consistent cast from cover to cliffhanger, and a print-ready PDF. Call with a plain-text 'story' argument and an optional 'pages' number. Returns the book's PDF and page-image URLs. Priced per page in USDT. Generation is synchronous and typically takes ~30-90 seconds depending on page count. BEFORE calling: if the user hasn't said how long they want it, ask how many pages (${BOOK_MIN_PAGES}-${BOOK_MAX_PAGES}). If the story sounds like it's part of a bigger, multi-chapter arc, ask whether they want the whole thing planned out now or just chapter 1 to start — for a multi-chapter story, use 'seriesId' (see its own field) so later chapters automatically keep the same cast and art style. Example call: { "story": "A forest that erases the names of everyone who enters it", "pages": 4, "style": "manga horror", "characters": [{ "name": "Mia", "description": "young hunter who writes everything in a notebook" }] }.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -91,6 +96,11 @@ export const MCP_TOOLS = [
         public: publicSchema,
       },
       required: ["story"],
+      examples: [
+        { story: "A weekend road trip where everything went wrong but we laughed the whole way.", pages: 4 },
+        { story: "A forest that erases the names of everyone who enters it", pages: 4, style: "manga horror", characters: [{ name: "Mia", description: "young hunter who writes everything in a notebook" }] },
+        { story: "Chapter 2: the crew reaches the frozen city.", pages: 6, seriesId: "frost-saga" },
+      ],
     },
     execution: { taskSupport: "forbidden" },
   },
