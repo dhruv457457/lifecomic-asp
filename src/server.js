@@ -380,48 +380,48 @@ app.post("/mcp/revise", asyncRoute(async (req, res) => {
   }
 }));
 
-// MCP JSON-RPC endpoint — the A2MCP interface. EVERY unpaid request returns a 402 challenge: GET,
-// empty POST, malformed body, AND the MCP discovery methods (initialize/tools-list). OKX's x402
-// validator probes with various unpaid requests (including a tools/list-shaped body) and flags ANY
-// unpaid 200 as "not a valid x402 service" — that single 200 on free discovery was the last thing
-// failing review even after GET/empty-POST already 402'd. So unlike a generic MCP server we do NOT
-// expose free discovery; this matches the plain-x402 pattern of services that pass review (e.g.
-// DejaVu, verified end-to-end). The paid tools/call flow is unaffected: buyers build the call from
-// the task's service-params (and our tolerant arg mapping), not from a free tools/list.
+// MCP JSON-RPC endpoint — the A2MCP interface. Per OKX review, x402 charges apply ONLY at the
+// `tools/call` stage: MCP discovery (`initialize`, `tools/list`, `ping`, notifications) is FREE, and
+// only `tools/call` (make_comic / make_book) is payment-gated. This is the standard MCP pattern used
+// by listed services (e.g. PixStudio #3633). Charging discovery was flagged in review — this file used
+// to gate everything, which OKX now rejects with "initiates x402 charges outside the tool/call stage."
+// After payment, handlePaidMcpRequest ALWAYS returns a comic deliverable (never `{}`).
+const FREE_MCP_METHODS = new Set(["initialize", "tools/list", "ping", "notifications/initialized", "initialized"]);
+
 app.post("/mcp", asyncRoute(async (req, res, next) => {
-  if (!mcpPaymentMiddleware) {
-    return res.status(503).json({ jsonrpc: "2.0", id: req.body?.id ?? null, error: { code: -32000, message: "payments not configured" } });
-  }
-  // Reject a malformed tools/call (unknown tool) BEFORE charging; every other shape hits the gate.
-  if (req.body?.method === "tools/call") {
-    const invalid = validateToolCall(req.body);
+  const method = req.body?.method;
+
+  // tools/call is the ONLY paid stage.
+  if (method === "tools/call") {
+    if (!mcpPaymentMiddleware) {
+      return res.status(503).json({ jsonrpc: "2.0", id: req.body?.id ?? null, error: { code: -32000, message: "payments not configured" } });
+    }
+    const invalid = validateToolCall(req.body); // reject an unknown tool BEFORE charging
     if (invalid) return res.json(invalid);
+    return mcpPaymentMiddleware(req, res, (err) => {
+      if (err) return next(err);
+      handlePaidMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) })
+        .then((out) => res.json(out))
+        .catch(next);
+    });
   }
-  // Gate payment; the middleware 402s an unpaid request itself, and calls our callback once paid+settled.
-  // Post-payment we use handlePaidMcpRequest, which ALWAYS returns a comic deliverable (never `{}`) —
-  // a buyer who paid but sent a non-tools/call body still gets their comic.
-  return mcpPaymentMiddleware(req, res, (err) => {
-    if (err) return next(err);
-    handlePaidMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) })
-      .then((out) => res.json(out))
-      .catch(next);
-  });
+
+  // Everything else (discovery + any other shape) is FREE — no x402 charge. handleMcpRequest returns
+  // the initialize/tools-list result, or null for a notification (which carries no response body).
+  const out = await handleMcpRequest(req.body, { runComic, baseUrl: resolveBaseUrl(req) });
+  if (out === null) return res.status(202).end();
+  return res.json(out);
 }));
 
-// GET /mcp — some x402 validators/reviewers probe with a plain GET (a real, currently-listed
-// service on this marketplace does this: it 402s on GET too, not 404). MCP's JSON-RPC discovery
-// methods are POST-only per spec, so a GET here can't carry a method/params body anyway — treat it
-// the same as an unauthenticated tools/call attempt and gate it on payment rather than 404ing.
-app.get("/mcp", asyncRoute(async (req, res, next) => {
-  if (!mcpPaymentMiddleware) {
-    return res.status(503).json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "payments not configured" } });
-  }
-  return mcpPaymentMiddleware(req, res, (err) => {
-    if (err) return next(err);
-    // A GET has no JSON-RPC body to act on; once paid, point the caller at the real POST call.
-    res.json({ jsonrpc: "2.0", id: null, result: { message: "Payment verified. POST a tools/call request to this same URL to generate your comic." } });
+// GET /mcp — MCP discovery is POST-only, so a GET carries no method/params. Return a free info blurb
+// (no x402 charge — charges apply only at tools/call, per OKX review).
+app.get("/mcp", (req, res) => {
+  res.json({
+    jsonrpc: "2.0",
+    id: null,
+    result: { message: "LifeComics MCP endpoint. POST JSON-RPC 2.0 — initialize / tools/list are free discovery; tools/call (make_comic, make_book) is x402-paid." },
   });
-}));
+});
 
 app.get("/jobs/:jobId", (req, res) => {
   const job = jobs.get(req.params.jobId);
