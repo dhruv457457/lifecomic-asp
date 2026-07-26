@@ -161,16 +161,18 @@ function toRenderRequest(name, args = {}) {
 
 function toolResultContent(name, out) {
   const pages = out.files?.pages || [];
+  const cbz = out.files?.cbz;
   const lines = [
     `Your comic "${out.title}" is ready.`,
     out.files?.pdf ? `PDF: ${out.files.pdf}` : null,
-    pages.length ? `Pages: ${pages.join("  ·  ")}` : null,
+    pages.length ? `PNG pages: ${pages.join("  ·  ")}` : null,
+    cbz ? `CBZ: ${cbz}` : null,
     out.social_caption ? `Caption: ${out.social_caption}` : null,
     out.seriesId ? `Series "${out.seriesId}", chapter ${out.chapterNumber}. Reuse this seriesId for the next chapter.` : null,
   ].filter(Boolean);
   return {
     content: [{ type: "text", text: lines.join("\n") }],
-    structuredContent: { title: out.title, pdf: out.files?.pdf, pages, storage: out.storage, seriesId: out.seriesId, chapterNumber: out.chapterNumber },
+    structuredContent: { title: out.title, pdf: out.files?.pdf, pages, cbz, storage: out.storage, seriesId: out.seriesId, chapterNumber: out.chapterNumber },
   };
 }
 
